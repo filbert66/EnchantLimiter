@@ -1,0 +1,3 @@
+
+# javac -classpath ../../../../../../../minecraft-server/MC_Server/CraftBukkit.jar *.java
+javac -Xlint:unchecked -Xlint:-deprecation -classpath ../../../../../../../minecraft-server/craftbukkit-1.7.2-R0.2.jar:../../../../../../../minecraft-server/MC_Server/plugins/LanguageAPI.jar *.java

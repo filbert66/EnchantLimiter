@@ -1,0 +1,10 @@
+
+*.class
+
+src/main/java/com/yahoo/phil_work/unbreakable/build
+
+*.jar
+
+testprep
+
+update

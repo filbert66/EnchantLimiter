@@ -1,0 +1,21 @@
+# 27 Feb 2014 : PSW :  New
+
+name: EnchLimiter
+main: com.yahoo.phil_work.enchlimiter.EnchLimiter
+version: 0.2
+author: filbert66
+description: Limits multiple enchants
+website: dev.bukkit.org/bukkit-plugins/enchlimiter
+
+permissions:
+  enchlimiter.*:
+    description: Gives access to ALL enchlimiter features
+    children:
+      enchlimiter.books: true
+      enchlimiter.multiple: true
+  enchlimiter.books:
+    description: Permits book + book enchants in anvil
+    default: op
+  enchlimiter.multiple:
+    description: Permits multiple enchants on an enchanting table
+    default: op
