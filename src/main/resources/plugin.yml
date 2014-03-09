@@ -2,10 +2,11 @@
 
 name: EnchLimiter
 main: com.yahoo.phil_work.enchlimiter.EnchLimiter
-version: 0.2
+version: 0.3
 author: filbert66
 description: Limits multiple enchants
 website: dev.bukkit.org/bukkit-plugins/enchlimiter
+softdepend: [LanguagesAPI]
 
 permissions:
   enchlimiter.*:
