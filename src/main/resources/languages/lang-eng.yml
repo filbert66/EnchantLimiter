@@ -1,0 +1,4 @@
+enabled: EnchantLimiter in force; by Filbert66
+limited: §9EnchLimiter§r: removed multiple {0} enchant
+cancelled: §9EnchLimiter§r: You don't have permission to do that
+attempted: {0} just tried to do a book+book enchant
