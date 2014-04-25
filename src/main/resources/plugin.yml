@@ -1,8 +1,9 @@
 # 27 Feb 2014 : PSW :  New
+# 24 Apr 2014 : PSW :  Added .disallowed
 
 name: EnchLimiter
 main: com.yahoo.phil_work.enchlimiter.EnchLimiter
-version: 0.3
+version: 0.6
 author: filbert66
 description: Limits multiple enchants
 website: dev.bukkit.org/bukkit-plugins/enchlimiter
@@ -19,4 +20,7 @@ permissions:
     default: op
   enchlimiter.multiple:
     description: Permits multiple enchants on an enchanting table
+    default: op
+  enchlimiter.disallowed:
+    description: Permits the disallowed enchants
     default: op
