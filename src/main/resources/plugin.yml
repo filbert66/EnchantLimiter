@@ -3,7 +3,7 @@
 
 name: EnchLimiter
 main: com.yahoo.phil_work.enchlimiter.EnchLimiter
-version: 0.6
+version: 0.7
 author: filbert66
 description: Limits multiple enchants
 website: dev.bukkit.org/bukkit-plugins/enchlimiter
@@ -15,6 +15,7 @@ permissions:
     children:
       enchlimiter.books: true
       enchlimiter.multiple: true
+      enchlimiter.disallowed: true
   enchlimiter.books:
     description: Permits book + book enchants in anvil
     default: op

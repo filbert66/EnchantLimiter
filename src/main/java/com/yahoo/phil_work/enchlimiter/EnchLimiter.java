@@ -7,6 +7,8 @@
  *  09 Apr 2014 : Added Limit Multiples config and "Message on limit" config.
  *  10 Apr 2014 : Added new config for inhibited enchants
  *  22 Apr 2014 : Added "ALL" enchantment config, support disallowed on anvil.
+ *  01 MAY 2014 : Changed XP return algorithm on enchant event.
+ *              : Allow for "ALL_*" material types.
  */
 
 package com.yahoo.phil_work.enchlimiter;
@@ -74,7 +76,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		
 		// Get List of disallowed enchants for that item and for ALL items
 		Map<Enchantment, Integer> disallowedEnchants = getDisallowedEnchants (item.getType());
-		disallowedEnchants.putAll (getDisallowedEnchants (Material.AIR));
+		disallowedEnchants.putAll (getDisallowedEnchants ("ALL"));
 		//*DEBUG*/log.info ("disallowed on " + item.getType() + disallowedEnchants);
 		
 		if ( !limitMultiples && disallowedEnchants.isEmpty())
@@ -82,30 +84,39 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				
 		Map<Enchantment,Integer> toAdd = new HashMap<Enchantment, Integer>();
 		toAdd.putAll (event.getEnchantsToAdd()); // to avoid modifying while iterating
+
+		int totalLevels =0;
+		for (Enchantment e : toAdd.keySet()) 
+			totalLevels += toAdd.get(e);
+		float XPperLevel = event.getExpLevelCost(); XPperLevel /= totalLevels;
+		//log.info ("Total enchants: " + toAdd.size() + ". Total levels: " + totalLevels + ". XP/lvl = " + XPperLevel);
+			
 		for (Enchantment ench : toAdd.keySet()) {
 			int level = toAdd.get(ench);
+			int returnedXP = (int)(0.5F + (XPperLevel * level));
+
 			if ( !limitMultiples || enchants == 0) {
 				if (disallowedEnchants.containsKey (ench) && level >= disallowedEnchants.get (ench) &&
 					! player.hasPermission ("enchlimiter.disallowed") ) 
 				{
-					event.setExpLevelCost (event.getExpLevelCost() - level);
+					event.setExpLevelCost (event.getExpLevelCost() - returnedXP);
 					event.getEnchantsToAdd().remove (ench);
-
+					
 					if (getConfig().getBoolean ("Message on disallowed", true))
-						player.sendMessage (language.get (player, "disallowed", 
-											chatName + ": removed disallowed enchant {0}-{1}", ench.getName(), level ));
+						player.sendMessage (language.get (player, "disallowed2", 
+											chatName + " removed disallowed {0}-{1} &returned {2} XP", ench.getName(), level, returnedXP ));
 				}
 				else {
 					enchants++;
-					//item.addEnchantment (ench, level);
 					//*DEBUG*/log.info ("Added " + ench + "-" + level + " to " +item.getType());
 				}
 			} else {
-				event.setExpLevelCost (event.getExpLevelCost() - level);
+				event.setExpLevelCost (event.getExpLevelCost() - returnedXP);
 				event.getEnchantsToAdd().remove (ench);
+
 				if (getConfig().getBoolean ("Message on limit", true))
-					player.sendMessage (language.get (player, "limited", 
-										chatName + ": removed multiple enchant {0}", ench.getName() ));
+					player.sendMessage (language.get (player, "limited2", 
+										chatName + " removed multiple {0}-{1} & returned {2} XP", ench.getName(), level, returnedXP ));
 			}
 		} 
 
@@ -162,7 +173,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		if (book != null && tool != null && isPlace)
 		{ // then might be using a book with another book
 			Map<Enchantment, Integer> disallowedEnchants = getDisallowedEnchants (tool.getType());
-			disallowedEnchants.putAll (getDisallowedEnchants (Material.AIR));
+			disallowedEnchants.putAll (getDisallowedEnchants ("ALL"));
 			boolean disallowed = false;
 			
 			ItemMeta meta = book.getItemMeta();
@@ -252,6 +263,123 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			}
 		}
 	}
+	public static boolean isHelmet (Material type) {
+		switch (type) {
+			case LEATHER_HELMET:
+			case IRON_HELMET:
+			case GOLD_HELMET: 
+			case DIAMOND_HELMET:
+			case CHAINMAIL_HELMET:
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	public static boolean isBoots (Material type) {
+		switch (type) {
+			case LEATHER_BOOTS:
+			case IRON_BOOTS:
+			case GOLD_BOOTS: 
+			case DIAMOND_BOOTS:
+			case CHAINMAIL_BOOTS:
+				return true;
+			default:
+				return false;
+		}
+	}
+	public static boolean isChestplate (Material type) {
+		switch (type) {
+			case LEATHER_CHESTPLATE:
+			case IRON_CHESTPLATE:
+			case GOLD_CHESTPLATE: 
+			case DIAMOND_CHESTPLATE:
+			case CHAINMAIL_CHESTPLATE:
+				return true;
+			default:
+				return false;
+		}
+	}
+	public static boolean isLeggings (Material type) {
+		switch (type) {
+			case LEATHER_LEGGINGS:
+			case IRON_LEGGINGS:
+			case GOLD_LEGGINGS: 
+			case DIAMOND_LEGGINGS:
+			case CHAINMAIL_LEGGINGS:
+				return true;
+			default:
+				return false;
+		}
+	}
+	// Should check BARDING (horse armor) but don't today
+	public static boolean isArmor (Material type) {
+		return isHelmet(type) || isChestplate (type) || isLeggings(type) || isBoots (type);
+	}
+	public static boolean isSword (Material type) {
+		switch (type) {
+			case IRON_SWORD:
+			case STONE_SWORD:
+			case GOLD_SWORD: 
+			case DIAMOND_SWORD:
+			case WOOD_SWORD:
+				return true;
+			default:
+				return false;
+		}
+	}
+	
+	public static boolean isSpade (Material type) {
+		switch (type) {
+			case IRON_SPADE:
+			case STONE_SPADE:
+			case GOLD_SPADE: 
+			case DIAMOND_SPADE:
+			case WOOD_SPADE:
+				return true;
+			default: 
+				return false;
+		}
+	}
+	
+	public static boolean isHoe (Material type) {
+		switch (type) {	
+			case IRON_HOE:
+			case STONE_HOE:
+			case GOLD_HOE: 
+			case DIAMOND_HOE:
+			case WOOD_HOE:
+				return true;
+			default: 
+				return false;
+		}
+	}
+
+	public static boolean isPick (Material type) {
+		switch (type) {				
+			case IRON_PICKAXE:
+			case STONE_PICKAXE:
+			case GOLD_PICKAXE: 
+			case DIAMOND_PICKAXE:
+			case WOOD_PICKAXE:
+				return true;
+			default: 
+				return false;
+		}
+	}
+	public static boolean isAxe (Material type) {
+		switch (type) {				
+			case IRON_AXE:
+			case STONE_AXE:
+			case GOLD_AXE: 
+			case DIAMOND_AXE:
+			case WOOD_AXE:
+				return true;
+			default: 
+				return false;
+		}
+	}
+	
 		
 	private void addNewLanguages () {
 		final String pluginPath = "plugins"+ getDataFolder().separator + getDataFolder().getName() + getDataFolder().separator;
@@ -279,14 +407,14 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		}	
 	}		
 	
-	private Map<Enchantment, Integer> getDisallowedEnchants (Material m) 
+	// Assumes correcting formed string
+	private Map<Enchantment, Integer> getDisallowedEnchants (String matString) 
 	{
 		HashMap<Enchantment, Integer> results = new HashMap<Enchantment, Integer>();
-		String matString = (m == Material.AIR ? "ALL" : m.toString());
 
 		if ( !getConfig().isConfigurationSection ("Disallowed enchants." + matString))
 			return results; // an empty list rather than null
-
+		
 		for (String enchantString : getConfig().getConfigurationSection ("Disallowed enchants." + matString).getKeys (false)) {
 			int level = getConfig().getInt ("Disallowed enchants." + matString + "." + enchantString);
 			if (level < 1) {
@@ -300,12 +428,48 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				}
 			}		
 			else if ((enchant = Enchantment.getByName (enchantString)) == null)
-			// TODO: Allow for "All" enchantments
 				log.warning ("Unknown enchantment: " + enchantString+ ". Refer to http://bit.ly/HxVS58");
 			else {
 				results.put (enchant, level);
 			}
+		}	
+		return results;
+	}
+	private Map<Enchantment, Integer> getDisallowedEnchants (Material m) 
+	{
+		HashMap<Enchantment, Integer> results = new HashMap<Enchantment, Integer>();
+		String matString = m.toString();
+
+		if (isSword (m))
+			results.putAll (getDisallowedEnchants ("ALL_SWORDS"));
+		else if (isSpade (m)) {
+			results.putAll (getDisallowedEnchants ("ALL_SPADES"));
+			results.putAll (getDisallowedEnchants ("ALL_SHOVELS"));			
+		} else if (isHoe (m))
+			results.putAll (getDisallowedEnchants ("ALL_HOES"));
+		else if (isPick (m)) {
+			results.putAll (getDisallowedEnchants ("ALL_PICKS"));
+			results.putAll (getDisallowedEnchants ("ALL_PICKAXES"));
+		} else if (isAxe (m))
+			results.putAll (getDisallowedEnchants ("ALL_AXES"));	
+		else if (isArmor (m)) {
+			results.putAll (getDisallowedEnchants ("ALL_ARMOR"));	
+			
+			if (isHelmet (m))
+				results.putAll (getDisallowedEnchants ("ALL_HELMETS"));	
+			if (isBoots (m))
+				results.putAll (getDisallowedEnchants ("ALL_BOOTS"));	
+			if (isChestplate (m))
+				results.putAll (getDisallowedEnchants ("ALL_CHESTPLATES"));	
+			if (isLeggings (m)) {
+				results.putAll (getDisallowedEnchants ("ALL_LEGGINGS"));	
+				results.putAll (getDisallowedEnchants ("ALL_PANTS"));	
+			}
 		}
+
+		if (getConfig().isConfigurationSection ("Disallowed enchants." + matString))
+			results.putAll (getDisallowedEnchants (matString));			
+
 		return results;
 	}   
 			
@@ -327,15 +491,17 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			{
 				for (String itemString : getConfig().getConfigurationSection ("Disallowed enchants").getKeys (false /*depth*/)) {
 					Material m = Material.matchMaterial (itemString);
-					if (itemString.equals("ALL"))
-						m = Material.AIR;
-						
+					if (itemString.equals("ALL") || itemString.equals ("ALL_ARMOR") || (itemString.startsWith ("ALL_") && itemString.endsWith ("S"))) {
+						log.config ("Disallowed enchants." + itemString + ":" + getDisallowedEnchants (itemString));	
+						continue;
+					}
+					
 					if (m == null)
-						log.warning ("Unknown item: " + itemString + ". Refer to http://bit.ly/1hjNiY7");
-					else if (m != Material.AIR && m.isBlock())
+						log.warning ("Unknown item: " + itemString + ". Refer to http://bit.ly/EnchMat");
+					else if (m.isBlock())
 						log.warning ("Do not support blocks in 'Disallowed enchants': " + m);
 					else {
-						log.config ("Disallowed enchants." + (m==Material.AIR ? "ALL" : m) + ":" + getDisallowedEnchants (m));
+						log.config ("Disallowed enchants." + itemString + ":" + getDisallowedEnchants (m));
 						// getDisallowedEnchants (m); 	// just for error checking
 					}
 				}
