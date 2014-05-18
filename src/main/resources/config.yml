@@ -2,5 +2,5 @@ Message on cancel: true
 Message on limit: true
 Message on disallowed: true
 Limit Multiples: true
-
+Stop pickup: false
 

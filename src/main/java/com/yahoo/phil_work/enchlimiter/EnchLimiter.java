@@ -9,6 +9,18 @@
  *  22 Apr 2014 : Added "ALL" enchantment config, support disallowed on anvil.
  *  01 MAY 2014 : Changed XP return algorithm on enchant event.
  *              : Allow for "ALL_*" material types.
+ *  08 May 2014 : On disallowed enchant, set to lower level if permitted
+ *                Added PlayerPickupItemEvent
+ *
+ * BUG: Sometimes able to place items in Anvil & do restricted enchant; no apparent enchant event.
+ * 
+ * TODO: 
+ *   Disallow equipping restricted item. But To block a player from wearing something is necessary to listen:
+		InventoryClick (put it on classic way)
+		PlayerInteract (righ click with it in hand)
+		BlockDispense (put with dispenser)
+	And of all of them with it's own problem (for dispensers is almost impossible to ensure a correct blocking).
+ * Alternative: Use PlayerPickupItemEvent
  */
 
 package com.yahoo.phil_work.enchlimiter;
@@ -23,6 +35,7 @@ import java.util.logging.Logger;
 import java.util.zip.*;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
@@ -37,9 +50,11 @@ import org.bukkit.entity.HumanEntity;
 import org.bukkit.event.Listener;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.enchantment.EnchantItemEvent;
+import org.bukkit.event.entity.ItemSpawnEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryType.SlotType;
+import org.bukkit.event.player.PlayerPickupItemEvent;
 import org.bukkit.Material;
 import org.bukkit.plugin.*;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -101,6 +116,15 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				{
 					event.setExpLevelCost (event.getExpLevelCost() - returnedXP);
 					event.getEnchantsToAdd().remove (ench);
+					
+					// try to set lower enchant level, if permitted
+					if (disallowedEnchants.get (ench) > 1) {
+						int newLevel = disallowedEnchants.get (ench) - 1;
+						item.addEnchantment (ench, newLevel);
+						int addedXP = (int)(0.5F + (XPperLevel * newLevel));
+						event.setExpLevelCost (event.getExpLevelCost() + addedXP);
+						returnedXP -= addedXP;
+					}
 					
 					if (getConfig().getBoolean ("Message on disallowed", true))
 						player.sendMessage (language.get (player, "disallowed2", 
@@ -263,6 +287,105 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			}
 		}
 	}
+
+	
+	@EventHandler (ignoreCancelled = true)
+	void itemMonitor (ItemSpawnEvent event) {
+		if (fixOrTestItem (event.getEntity().getItemStack(), null)) {
+			// log.info ("Modified enchants on spawned " + event.getEntity().getItemStack().getType());
+		}
+	}
+	
+	static Map <UUID, Long> lastMsg = new HashMap<UUID, Long>();
+	
+	@EventHandler (ignoreCancelled = true)
+	void pickupMonitor (PlayerPickupItemEvent event) {
+		Player player = event.getPlayer();
+		ItemStack item = event.getItem().getItemStack();
+
+		if (fixOrTestItem (item, player)) {
+			if (getConfig().getBoolean ("Stop pickup")) {
+				event.setCancelled (true);
+				
+				Long lastTime = lastMsg.get (player.getUniqueId());
+				long currTime = System.currentTimeMillis();
+
+				// not if in last 2 seconds
+				if (lastTime == null || currTime - lastTime > 2000) {
+					lastMsg.put (player.getUniqueId(), currTime);
+					player.sendMessage (language.get (player, "disallowedPickup1", 
+										chatName + ": can't pickup {0} with disallowed enchant(s)", 
+										item.getType() ));
+				}
+			} 
+		}
+	}
+	
+	// returns true if item has enchants on disallowed list
+	//  if "Stop pickup" is NOT set, will remove disallowed enchants
+	boolean fixOrTestItem (ItemStack item, Player p) {
+		boolean testOnly = getConfig().getBoolean ("Stop pickup", true);
+		
+		boolean limitMultiples = getConfig().getBoolean ("Limit Multiples", true) && 
+			(p == null || ! p.hasPermission ("enchlimiter.multiple"));
+		
+		int enchants = 0;
+		
+		// Get List of disallowed enchants for that item and for ALL items
+		Map<Enchantment, Integer> disallowedEnchants = getDisallowedEnchants (item.getType());
+		disallowedEnchants.putAll (getDisallowedEnchants ("ALL"));
+		//*DEBUG*/log.info ("disallowed on " + item.getType() + disallowedEnchants);
+		
+		if ( !item.getItemMeta().hasEnchants() || (!limitMultiples && disallowedEnchants.isEmpty()))
+			return false;  // nothing to do; leave event alive for another plugin
+		boolean modified = false;
+						
+		Map<Enchantment,Integer> toAdd = new HashMap<Enchantment, Integer>();
+		toAdd.putAll (item.getEnchantments()); // to avoid modifying while iterating
+			
+		for (Enchantment ench : toAdd.keySet()) {
+			int level = toAdd.get(ench);
+
+			if ( !limitMultiples || enchants == 0) {
+				if (disallowedEnchants.containsKey (ench) && level >= disallowedEnchants.get (ench) &&
+					(p == null || ! p.hasPermission ("enchlimiter.disallowed")) ) 
+				{
+					if (testOnly) {
+						return true;
+					}
+					else
+						modified = true;
+						
+					item.removeEnchantment (ench);
+					// Add back at lower level, if possible
+					if (disallowedEnchants.get (ench) > 1)
+						item.addEnchantment (ench, disallowedEnchants.get (ench) - 1);
+					
+					if (getConfig().getBoolean ("Message on disallowed", true) && p != null)
+						p.sendMessage (language.get (p, "disallowed3", 
+									   chatName + " removed disallowed {0}-{1} from {2}", ench.getName(), level, item.getType() ));
+				}
+				else {
+					enchants++;
+					//*DEBUG*/log.info ("Added " + ench + "s-" + level + " to " +item.getType());
+				}
+			} else {
+				if (testOnly) {
+					return true;
+				}
+				else
+					modified = true;
+					
+				item.removeEnchantment (ench);					
+
+				if (getConfig().getBoolean ("Message on limit", true) && p != null)
+					p.sendMessage (language.get (p, "limited3", 
+									chatName + " removed multiple {0}-{1} from {2}", ench.getName(), level, item.getType() ));
+			}
+		} 		
+		return modified;
+	}
+	
 	public static boolean isHelmet (Material type) {
 		switch (type) {
 			case LEATHER_HELMET:

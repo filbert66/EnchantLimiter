@@ -1,8 +1,12 @@
 enabled: EnchantLimiter in force; by Filbert66
 limited2: §9EnchLimiter§r removed multiple {0}-{1} & returned {2} XP
-disallowed2: §9EnchLimiter§r removed disallowed {0}-{1} &returned {2} XP
 cancelled: §9EnchLimiter§r: You don't have permission to do that
 attempted: {0} just tried to do a book+book enchant
 attempted2: {0} just tried to do a disallowed anvil enchant
 bookEnch: Permitting {0} to enchant book+book
 loggedoff: {0} logged off before we could cancel anvil enchant
+disallowed2: §9EnchLimiter§r removed disallowed {0}-{1} &returned {2} XP
+disallowed3: §9EnchLimiter§r removed disallowed {0}-{1} from {2}
+multiplePickup: §9EnchLimiter§r: can't pickup item with multiple enchants
+limited3: §9EnchLimiter§r removed multiple {0}-{1} from {2}
+disallowedPickup1: §9EnchLimiter§r: can't pickup {0} with disallowed enchant(s)
