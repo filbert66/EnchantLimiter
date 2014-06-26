@@ -11,8 +11,10 @@
  *              : Allow for "ALL_*" material types.
  *  08 May 2014 : On disallowed enchant, set to lower level if permitted
  *                Added PlayerPickupItemEvent
+ *  22 Jun 2014 : Added blocking of item repair beyond allowed level or item+book boost beyond allowed
+ *              : Added fail-safe on picking up disallowed result; doesn't return XP currently.
  *
- * BUG: Sometimes able to place items in Anvil & do restricted enchant; no apparent enchant event.
+ * Bukkit BUG: Sometimes able to place items in Anvil & do restricted enchant; no ItemClickEvent!
  * 
  * TODO: 
  *   Disallow equipping restricted item. But To block a player from wearing something is necessary to listen:
@@ -20,7 +22,6 @@
 		PlayerInteract (righ click with it in hand)
 		BlockDispense (put with dispenser)
 	And of all of them with it's own problem (for dispensers is almost impossible to ensure a correct blocking).
- * Alternative: Use PlayerPickupItemEvent
  */
 
 package com.yahoo.phil_work.enchlimiter;
@@ -53,6 +54,7 @@ import org.bukkit.event.enchantment.EnchantItemEvent;
 import org.bukkit.event.entity.ItemSpawnEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.PrepareItemCraftEvent;
 import org.bukkit.event.inventory.InventoryType.SlotType;
 import org.bukkit.event.player.PlayerPickupItemEvent;
 import org.bukkit.Material;
@@ -172,8 +174,64 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			default:
 				break;
 		}
-	
-		if (inv.getType()== InventoryType.ANVIL && event.getSlotType() == SlotType.CRAFTING) {
+		final HumanEntity human = event.getWhoClicked();
+		final Player player = (Player)human; 
+		if (!(human instanceof Player)) {
+			log.warning (human + " clicked on anvil, not a Player");
+			return;
+		}
+		
+		/* Sometimes, Bukkit client places item in crafting without giving server event.
+		 * Hence, add double-check to see if they just crafted an illegal item. If this works well, could remove 
+		 *  other code, but that is more disturbing to players since it appeared to work. 
+		 * Conclusion: hard to calculate XP to return, so left alone: for rare illegal cases you've lost it.
+		 * Idea: note in static hashmap Xp when they place item in anvil (or open it and erase when they close it)
+		 *   and then restore that if they've crafted something illegal. 
+		 */
+		if (inv.getType()== InventoryType.ANVIL && event.getSlotType() == SlotType.RESULT) {
+			// log.info ("Looks like you " + action + " " + event.getSlotType() + " " + event.getCurrentItem() + " with " + event.getCursor() + " on cursor");
+			ItemStack[] anvilContents = inv.getContents();
+			final ItemStack slot0 = anvilContents[0];
+			final ItemStack slot1 = anvilContents[1];
+			ItemStack result = event.getCurrentItem();
+
+			//log.info ("Crafted from 0: " + slot0);
+			//log.info ("Crafted from 1: " + slot1);
+			
+			if (hasIllegalEnchant (result, player))
+			{
+				final int playerXP = player.getTotalExperience(); // BUG: Already after completed!
+				class anvilUndoer extends BukkitRunnable {
+					@Override
+					public void run() {
+						if ( !player.isOnline()) {
+							log.info (language.get (player, "loggedoff", "{0} logged off before we could cancel anvil enchant", player.getName()));
+							return;
+						}
+						if (player.getOpenInventory().getTopInventory().getType() != InventoryType.ANVIL) {
+							//*DEBUG*/log.info (player.getName() + " closed inventory before enchant occurred");
+							return;
+						}
+						AnvilInventory aInventory = (AnvilInventory)player.getOpenInventory().getTopInventory();
+						InventoryView pInventory = player.getOpenInventory();
+
+						// Execute cancel
+						pInventory.setCursor (null); // take away illegal item
+						aInventory.setItem(0, slot0); // return craft ingredient 1
+						aInventory.setItem(1, slot1); // return craft ingredient 2
+						player.setTotalExperience (playerXP);
+												
+						if (getConfig().getBoolean ("Message on cancel"))
+							player.sendMessage (language.get (player, "cancelled", chatName + ": You don't have permission to do that"));
+
+						log.info (language.get (Bukkit.getConsoleSender(), "attempted3", "{0} almost took result of a disallowed anvil enchant", player.getName()));
+					}
+				}
+				if (player != null)
+					(new anvilUndoer()).runTask(this);				
+			}
+		}
+		else if (inv.getType()== InventoryType.ANVIL && event.getSlotType() == SlotType.CRAFTING) {
 			ItemStack[] anvilContents = inv.getContents();
 			ItemStack slot0 = anvilContents[0];
 			ItemStack slot1 = anvilContents[1];
@@ -181,13 +239,16 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			if (isPlace) {
 				//log.info ("Placed a " + event.getCursor() + " in slot " + event.getRawSlot());
 				//log.info ("currentItem: " +  event.getCurrentItem());
-				if (event.getRawSlot() == 1)
+				if (event.getRawSlot() == 1) {
+					//log.info ("reset slot1 from " + slot1 + " to " + event.getCursor());
 					slot1 = event.getCursor();
-				else if (event.getRawSlot() == 0)
+				} else if (event.getRawSlot() == 0) {
+					//log.info ("reset slot0 from " + slot0 + " to " + event.getCursor());
 					slot0 = event.getCursor();
+				}
 			}	
 			// 1 is right slot of anvil
-			if (slot1 != null && slot1.getType() == Material.ENCHANTED_BOOK)
+			if (slot1 != null /*&& slot1.getType() == Material.ENCHANTED_BOOK */)
 				book = slot1;
 			// 0 is left slot of Anvil
 			if (slot0 != null /* && slot0.getType() == Material.ENCHANTED_BOOK */)
@@ -195,23 +256,34 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			// log.info ("Found book: " + book + "; tool: " + tool);
 		}
 		if (book != null && tool != null && isPlace)
-		{ // then might be using a book with another book
+		{ 
 			Map<Enchantment, Integer> disallowedEnchants = getDisallowedEnchants (tool.getType());
 			disallowedEnchants.putAll (getDisallowedEnchants ("ALL"));
 			boolean disallowed = false;
-			
+									
 			ItemMeta meta = book.getItemMeta();
-			if ( !(meta instanceof EnchantmentStorageMeta))
-				log.warning ("Book without storage meta: " + book);
-			else {
+			if ( !(meta instanceof EnchantmentStorageMeta)) {
+				if (tool.getType() == book.getType() && tool.getDurability() == 0 && book.getDurability() == 0) {
+					log.info ("Enchant combo attempt of " + tool.getType());
+					for (Enchantment e: book.getEnchantments().keySet()) {
+						//*DEBUG*/log.info ("testing for " + e + "-" + bookStore.getStoredEnchantLevel(e));
+						if (disallowedEnchants.containsKey (e)) {
+							if (disallowedEnchants.get(e) <= book.getEnchantmentLevel(e) )
+								disallowed = true; // second item alone too high
+							else if (tool.getEnchantmentLevel (e) >= disallowedEnchants.get(e) - 1)
+								disallowed = true;	// trying to boost enchant of existing item at limit
+						}
+					}
+				}	
+			} else {
 				EnchantmentStorageMeta bookStore = (EnchantmentStorageMeta)meta;
 				for (Enchantment e: bookStore.getStoredEnchants().keySet()) {
 					//*DEBUG*/log.info ("testing for " + e + "-" + bookStore.getStoredEnchantLevel(e));
-					if (disallowedEnchants.containsKey (e) && 
-						disallowedEnchants.get(e) <= bookStore.getStoredEnchantLevel(e) )
-						disallowed = true;
-					else { 
-						//*DEBUG*/log.info ("Allowing enchant bcs disallowed=" + disallowedEnchants.get(e));
+					if (disallowedEnchants.containsKey (e)) {
+						if (disallowedEnchants.get(e) <= bookStore.getStoredEnchantLevel(e) )
+							disallowed = true; // book too high
+						else if (tool.getEnchantmentLevel (e) >= disallowedEnchants.get(e) - 1)
+							disallowed = true;	// trying to boost enchant of existing item at limit
 					}
 				}
 			}
@@ -222,16 +294,10 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			    (limitMultiples && 
 				 (book.getType() == Material.ENCHANTED_BOOK && tool.getType() == Material.ENCHANTED_BOOK) ) )
 			{
-				final HumanEntity human = event.getWhoClicked();
-				final Player player = (Player)human; 
 				final ItemStack slot0 = tool.clone(), slot1 = book;
 				final boolean disallowedEntry = disallowed;
 				
-				if (!(human instanceof Player)) {
-					log.warning (human + " clicked on anvil, not a Player");
-					return;
-				}
-				else if (!disallowed && player.hasPermission ("enchlimiter.books")) {
+				if (!disallowed && player.hasPermission ("enchlimiter.books")) {
 					log.info (language.get (Bukkit.getConsoleSender(), "bookEnch", "Permitting {0} to enchant book+book", player.getName()));
 					return;
 				}
@@ -320,8 +386,40 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			} 
 		}
 	}
+	// returns true if has enchants on disallowed list or multiple when not allowed
+	boolean hasIllegalEnchant (final ItemStack item, final Player p) {
+		boolean limitMultiples = getConfig().getBoolean ("Limit Multiples", true) && 
+			(p == null || ! p.hasPermission ("enchlimiter.multiple"));
+		if (item == null || !item.hasItemMeta())
+			return false;
+			
+		// Get List of disallowed enchants for that item and for ALL items
+		Map<Enchantment, Integer> disallowedEnchants = getDisallowedEnchants (item.getType());
+		disallowedEnchants.putAll (getDisallowedEnchants ("ALL"));
+		
+		if ( !item.getItemMeta().hasEnchants() || (!limitMultiples && disallowedEnchants.isEmpty()))
+			return false;  // nothing to do; leave event alive for another plugin
+			
+		// Check for multiples
+		if (limitMultiples && item.getEnchantments().size() > 1)
+			return true;
+		else if (p != null && p.hasPermission ("enchlimiter.disallowed"))
+			return false;	// no need to check
+			
+		// Check disallowed enchants
+		for (Enchantment ench : item.getEnchantments().keySet()) {
+			int level = item.getEnchantments().get(ench);
+
+			if (disallowedEnchants.containsKey (ench) && level >= disallowedEnchants.get (ench) &&
+				(p == null || ! p.hasPermission ("enchlimiter.disallowed")) ) 
+			{
+				return true;
+			}						
+		} 		
+		return false;
+	}	
 	
-	// returns true if item has enchants on disallowed list
+	// returns true if item has enchants on disallowed list or multiple when not allowed
 	//  if "Stop pickup" is NOT set, will remove disallowed enchants
 	boolean fixOrTestItem (ItemStack item, Player p) {
 		boolean testOnly = getConfig().getBoolean ("Stop pickup", true);

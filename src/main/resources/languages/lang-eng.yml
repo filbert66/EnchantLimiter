@@ -3,6 +3,7 @@ limited2: §9EnchLimiter§r removed multiple {0}-{1} & returned {2} XP
 cancelled: §9EnchLimiter§r: You don't have permission to do that
 attempted: {0} just tried to do a book+book enchant
 attempted2: {0} just tried to do a disallowed anvil enchant
+attempted3: {0} almost took result of a disallowed anvil enchant
 bookEnch: Permitting {0} to enchant book+book
 loggedoff: {0} logged off before we could cancel anvil enchant
 disallowed2: §9EnchLimiter§r removed disallowed {0}-{1} &returned {2} XP
