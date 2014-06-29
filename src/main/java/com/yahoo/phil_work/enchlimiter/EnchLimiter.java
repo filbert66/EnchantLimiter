@@ -13,6 +13,7 @@
  *                Added PlayerPickupItemEvent
  *  22 Jun 2014 : Added blocking of item repair beyond allowed level or item+book boost beyond allowed
  *              : Added fail-safe on picking up disallowed result; doesn't return XP currently.
+ *  26 Jun 2014 : Added prevXP hashmap for anvilUndoer.
  *
  * Bukkit BUG: Sometimes able to place items in Anvil & do restricted enchant; no ItemClickEvent!
  * 
@@ -54,6 +55,7 @@ import org.bukkit.event.enchantment.EnchantItemEvent;
 import org.bukkit.event.entity.ItemSpawnEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.PrepareItemCraftEvent;
 import org.bukkit.event.inventory.InventoryType.SlotType;
 import org.bukkit.event.player.PlayerPickupItemEvent;
@@ -151,7 +153,15 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			event.setCancelled (true);
 		}
 	}
-
+	
+	// Is set with ClickEvent, when placing in crafting slot of an anvil.
+	private static Map <UUID, Integer> prevXP = new HashMap<UUID, Integer>();
+	
+	@EventHandler (ignoreCancelled = true) 
+	void closeAnvilMonitor (InventoryCloseEvent event) {
+		if (event.getInventory().getType()== InventoryType.ANVIL)
+			prevXP.remove (event.getPlayer().getUniqueId());
+	}
 	//  Listen to PrepareItemCraftEvent and return one of the books 
 	@EventHandler (ignoreCancelled = true)
 	void craftMonitor (InventoryClickEvent event) {
@@ -184,8 +194,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		/* Sometimes, Bukkit client places item in crafting without giving server event.
 		 * Hence, add double-check to see if they just crafted an illegal item. If this works well, could remove 
 		 *  other code, but that is more disturbing to players since it appeared to work. 
-		 * Conclusion: hard to calculate XP to return, so left alone: for rare illegal cases you've lost it.
-		 * Idea: note in static hashmap Xp when they place item in anvil (or open it and erase when they close it)
+		 * Conclusion: note in static hashmap Xp when they place item in anvil (or open it and erase when they close it)
 		 *   and then restore that if they've crafted something illegal. 
 		 */
 		if (inv.getType()== InventoryType.ANVIL && event.getSlotType() == SlotType.RESULT) {
@@ -200,7 +209,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			
 			if (hasIllegalEnchant (result, player))
 			{
-				final int playerXP = player.getTotalExperience(); // BUG: Already after completed!
+				final int playerXP = prevXP.get (player.getUniqueId());
 				class anvilUndoer extends BukkitRunnable {
 					@Override
 					public void run() {
@@ -219,7 +228,8 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 						pInventory.setCursor (null); // take away illegal item
 						aInventory.setItem(0, slot0); // return craft ingredient 1
 						aInventory.setItem(1, slot1); // return craft ingredient 2
-						player.setTotalExperience (playerXP);
+						if (getConfig().getBoolean ("Restore levels"))
+							player.setLevel (playerXP);
 												
 						if (getConfig().getBoolean ("Message on cancel"))
 							player.sendMessage (language.get (player, "cancelled", chatName + ": You don't have permission to do that"));
@@ -237,6 +247,11 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			ItemStack slot1 = anvilContents[1];
 			
 			if (isPlace) {
+				// Remember for later, in case we need it. 
+				Integer curXP = player.getLevel();	// need to get/set levels, not XP (progress to next)
+				prevXP.put (player.getUniqueId(), curXP);
+				//*DEBUG*/ log.info ("saved XP at " + curXP);
+				
 				//log.info ("Placed a " + event.getCursor() + " in slot " + event.getRawSlot());
 				//log.info ("currentItem: " +  event.getCurrentItem());
 				if (event.getRawSlot() == 1) {
@@ -264,7 +279,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			ItemMeta meta = book.getItemMeta();
 			if ( !(meta instanceof EnchantmentStorageMeta)) {
 				if (tool.getType() == book.getType() && tool.getDurability() == 0 && book.getDurability() == 0) {
-					log.info ("Enchant combo attempt of " + tool.getType());
+					// log.info ("Enchant combo attempt of " + tool.getType());
 					for (Enchantment e: book.getEnchantments().keySet()) {
 						//*DEBUG*/log.info ("testing for " + e + "-" + bookStore.getStoredEnchantLevel(e));
 						if (disallowedEnchants.containsKey (e)) {
