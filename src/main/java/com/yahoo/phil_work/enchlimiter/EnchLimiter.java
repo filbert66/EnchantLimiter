@@ -14,6 +14,8 @@
  *  22 Jun 2014 : Added blocking of item repair beyond allowed level or item+book boost beyond allowed
  *              : Added fail-safe on picking up disallowed result; doesn't return XP currently.
  *  26 Jun 2014 : Added prevXP hashmap for anvilUndoer.
+ *  07 Jul 2014 : Added better check on anvil MOVE_TO_OTHER_INVENTORY;
+ *              : Added commands, only reload for now.
  *
  * Bukkit BUG: Sometimes able to place items in Anvil & do restricted enchant; no ItemClickEvent!
  * 
@@ -41,6 +43,8 @@ import java.util.UUID;
 
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandSender;
 import org.bukkit.inventory.*;
 import org.bukkit.inventory.meta.EnchantmentStorageMeta;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -170,7 +174,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		Inventory inv = event.getInventory();
 		boolean limitMultiples = getConfig().getBoolean ("Limit Multiples", true);
 	
-		// log.info ("InventoryClickEvent " +event.getAction()+" in type " + inv.getType() + " in  slot " + event.getRawSlot() + "(raw " + event.getSlot());
+		//log.info ("InventoryClickEvent " +event.getAction()+" in type " + inv.getType() + " in  slot " + event.getRawSlot() + "(raw " + event.getSlot()+ ") slotType "+ event.getSlotType());
 		InventoryAction action = event.getAction();
 		boolean isPlace = false;
 		switch (action) {
@@ -181,6 +185,8 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			case MOVE_TO_OTHER_INVENTORY: // could be.. 
 				isPlace = true;
 				break;
+			case NOTHING:
+				return;
 			default:
 				break;
 		}
@@ -252,8 +258,15 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				prevXP.put (player.getUniqueId(), curXP);
 				//*DEBUG*/ log.info ("saved XP at " + curXP);
 				
-				//log.info ("Placed a " + event.getCursor() + " in slot " + event.getRawSlot());
+				// log.info ("Placed a " + event.getCursor() + " in slot " + event.getRawSlot());
 				//log.info ("currentItem: " +  event.getCurrentItem());
+				/** 
+				 * Problem with MOVE_TO_OTHER_INVENTORY
+				 *  "InventoryClickEvent MOVE_TO_OTHER_INVENTORY in type ANVIL in  slot 8(raw 14)"
+				 * moves the item to next open anvil slot. 
+				 * Can I detect to which slot it moved?? Maybe if SlotType == CONTAINER
+				 *  if so, this branch doesn't even get called!
+				 */
 				if (event.getRawSlot() == 1) {
 					//log.info ("reset slot1 from " + slot1 + " to " + event.getCursor());
 					slot1 = event.getCursor();
@@ -269,6 +282,27 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			if (slot0 != null /* && slot0.getType() == Material.ENCHANTED_BOOK */)
 				tool = slot0;
 			// log.info ("Found book: " + book + "; tool: " + tool);
+		} 
+		else if (inv.getType()== InventoryType.ANVIL && action == InventoryAction.MOVE_TO_OTHER_INVENTORY) {
+			ItemStack[] anvilContents = inv.getContents();
+			ItemStack slot0 = anvilContents[0]; tool = slot0;
+			ItemStack slot1 = anvilContents[1]; book = slot1;
+			
+			if (event.getSlotType() == SlotType.CONTAINER || event.getSlotType() == SlotType.QUICKBAR)
+			/** DEBUG
+			log.info ("Potential swap to Anvil. Currently in slot0: " + slot0);
+			log.info ("slot1: " + slot1);
+			log.info ("clicked: " + event.getCurrentItem());
+			**/
+
+			/** Find if one slot is open, then assume current item will become it. Start from slot 0 
+			 *   Know that getCurrentItem() is not null bcs it is MOVE_TO_OTHER_INV action
+			 */
+			if (slot0 == null || slot0.getType() == Material.AIR)
+				tool = event.getCurrentItem();
+			else if (slot1 == null || slot1.getType() == Material.AIR)
+				book = event.getCurrentItem();		
+			//log.info ("Move check with tool: " + tool + " & book: " + book);
 		}
 		if (book != null && tool != null && isPlace)
 		{ 
@@ -708,6 +742,90 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 
 		return results;
 	}   
+	
+	void checkConfig() {
+		if (getConfig().isConfigurationSection ("Disallowed enchants")) 
+		{
+			for (String itemString : getConfig().getConfigurationSection ("Disallowed enchants").getKeys (false /*depth*/)) {
+				Material m = Material.matchMaterial (itemString);
+				if (itemString.equals("ALL") || itemString.equals ("ALL_ARMOR") || (itemString.startsWith ("ALL_") && itemString.endsWith ("S"))) {
+					log.config ("Disallowed enchants." + itemString + ":" + getDisallowedEnchants (itemString));	
+					continue;
+				}
+				
+				if (m == null)
+					log.warning ("Unknown item: " + itemString + ". Refer to http://bit.ly/EnchMat");
+				else if (m.isBlock())
+					log.warning ("Do not support blocks in 'Disallowed enchants': " + m);
+				else {
+					log.config ("Disallowed enchants." + itemString + ":" + getDisallowedEnchants (m));
+					// getDisallowedEnchants (m); 	// just for error checking
+				}
+			}
+		}
+	}		
+
+    void sendMsg (CommandSender requestor, String msg)
+	{
+		if (requestor == null)
+			return;
+			
+		if (requestor instanceof Player) {
+			requestor.sendMessage (msg);
+		}
+		else // Server console. Color codes may look nice on a terminal, but not on text file
+		{
+			requestor.sendMessage(ChatColor.stripColor (msg));
+		}
+	}
+
+    @Override
+    public boolean onCommand(CommandSender sender, Command command, String commandLabel, String[] args) {
+        String commandName = command.getName().toLowerCase();
+        String[] trimmedArgs = args;
+
+        if (commandName.equals("el")) {
+            return elCommands(sender, trimmedArgs);
+		}
+		return false;
+	}
+
+    private boolean elCommands(CommandSender sender, String[] args) {	
+		if (args.length == 0) 
+			return false; // print usage
+
+		String commandName = args[0].toLowerCase();
+        if (commandName.equals("print")) {
+			sender.sendMessage ("print not yet implemented");
+            return true; // printConfig (sender);
+		}
+		else if (commandName.equals("reload")) {
+			this.reloadConfig();
+			this.checkConfig();
+			return true;									
+		}
+		else if (commandName.equals("save")) {
+			this.saveConfig();
+			return true;									
+		}
+/**
+		else if (commandName.equals ("boolean")) {
+			boolean ifSet = this.getConfig().getBoolean ("nerf_fire.nostartby.op");
+			
+			if (args.length == 1) {
+				sendMsg (sender, "OPs are " + (ifSet ? "" : ChatColor.RED + "NOT " + ChatColor.RESET) + "allowed to start fires");
+				return true;
+			}
+			// else have a param
+			boolean turnOn = args[1].toLowerCase().equals ("true");
+			this.getConfig().set ("nerf_fire.nostartby.op", !turnOn);
+			sendMsg (sender, ChatColor.BLUE + "nerf_fire.nostartby.op" + ChatColor.DARK_BLUE + 
+								" now " + ChatColor.GRAY + !turnOn);
+			return true;
+		}				
+**/
+		return false;
+	}
 			
 	public void onEnable()
 	{
@@ -723,33 +841,18 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			saveDefaultConfig();
 		} else {
 			// Parse config for errors
-			if (getConfig().isConfigurationSection ("Disallowed enchants")) 
-			{
-				for (String itemString : getConfig().getConfigurationSection ("Disallowed enchants").getKeys (false /*depth*/)) {
-					Material m = Material.matchMaterial (itemString);
-					if (itemString.equals("ALL") || itemString.equals ("ALL_ARMOR") || (itemString.startsWith ("ALL_") && itemString.endsWith ("S"))) {
-						log.config ("Disallowed enchants." + itemString + ":" + getDisallowedEnchants (itemString));	
-						continue;
-					}
-					
-					if (m == null)
-						log.warning ("Unknown item: " + itemString + ". Refer to http://bit.ly/EnchMat");
-					else if (m.isBlock())
-						log.warning ("Do not support blocks in 'Disallowed enchants': " + m);
-					else {
-						log.config ("Disallowed enchants." + itemString + ":" + getDisallowedEnchants (m));
-						// getDisallowedEnchants (m); 	// just for error checking
-					}
-				}
-			}
+			checkConfig();
 		}
 		addNewLanguages();		
 			
 		getServer().getPluginManager().registerEvents ((Listener)this, this);
 		log.info (language.get (Bukkit.getConsoleSender(), "enabled", "EnchantLimiter in force; by Filbert66"));
 	}
+
 	
 	public void onDisable()
 	{
+		prevXP.clear();
+		lastMsg.clear();
 	}
 }

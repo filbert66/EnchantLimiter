@@ -1,9 +1,10 @@
 # 27 Feb 2014 : PSW :  New
 # 24 Apr 2014 : PSW :  Added .disallowed
+# 07 Jul 2014 : PSW :  Added commands
 
 name: EnchLimiter
 main: com.yahoo.phil_work.enchlimiter.EnchLimiter
-version: 1.0
+version: 1.1
 author: filbert66
 description: Limits enchants by multiples or configured list
 website: dev.bukkit.org/bukkit-plugins/enchlimiter
@@ -16,6 +17,7 @@ permissions:
       enchlimiter.books: true
       enchlimiter.multiple: true
       enchlimiter.disallowed: true
+      enchlimiter.el: true
   enchlimiter.books:
     description: Permits book + book enchants in anvil
     default: op
@@ -25,3 +27,14 @@ permissions:
   enchlimiter.disallowed:
     description: Permits the disallowed enchants
     default: op
+  enchlimiter.el:
+    description: Permits the admin commands
+    default: op
+
+commands:
+   el:
+      description: This is the admin enchlimiter interface
+      aliases: enchlimiter
+      usage: /<command> reload
+      permission: enchlimiter.el
+      permission-message: You don't have <permission>
