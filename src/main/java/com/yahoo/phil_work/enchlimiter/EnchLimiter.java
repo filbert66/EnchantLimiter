@@ -16,6 +16,8 @@
  *  26 Jun 2014 : Added prevXP hashmap for anvilUndoer.
  *  07 Jul 2014 : Added better check on anvil MOVE_TO_OTHER_INVENTORY;
  *              : Added commands, only reload for now.
+ *  12 Jul 2014 : Moved commands to separate class; fixed bugs with books.
+ *              : Added 'Downgrade repairs', and 'Allow repairs'
  *
  * Bukkit BUG: Sometimes able to place items in Anvil & do restricted enchant; no ItemClickEvent!
  * 
@@ -68,6 +70,8 @@ import org.bukkit.plugin.*;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.plugin.PluginLogger;
 import org.bukkit.scheduler.BukkitRunnable;
+
+import com.yahoo.phil_work.enchlimiter.EnchLimiterCommandExecutor;
 
 public class EnchLimiter extends JavaPlugin implements Listener {
 	public Logger log;
@@ -128,10 +132,13 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					// try to set lower enchant level, if permitted
 					if (disallowedEnchants.get (ench) > 1) {
 						int newLevel = disallowedEnchants.get (ench) - 1;
-						item.addEnchantment (ench, newLevel);
+						// avoid adding directly to item so we can avoid book details
+						//   also allows another handler to cancel
+						event.getEnchantsToAdd().put (ench, newLevel);
 						int addedXP = (int)(0.5F + (XPperLevel * newLevel));
 						event.setExpLevelCost (event.getExpLevelCost() + addedXP);
 						returnedXP -= addedXP;
+						enchants++;
 					}
 					
 					if (getConfig().getBoolean ("Message on disallowed", true))
@@ -166,6 +173,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		if (event.getInventory().getType()== InventoryType.ANVIL)
 			prevXP.remove (event.getPlayer().getUniqueId());
 	}
+	
 	//  Listen to PrepareItemCraftEvent and return one of the books 
 	@EventHandler (ignoreCancelled = true)
 	void craftMonitor (InventoryClickEvent event) {
@@ -213,6 +221,27 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			//log.info ("Crafted from 0: " + slot0);
 			//log.info ("Crafted from 1: " + slot1);
 			
+			boolean isRepair = (slot0.getType() == slot1.getType() && slot0.getDurability() > 0 && !slot1.getItemMeta().hasEnchants());
+			if (isRepair) {
+				if (hasIllegalEnchant (slot0, player)) {
+					if ( !getConfig().getBoolean ("Stop repairs") || player.hasPermission ("enchlimiter.repairs")) {
+						if (getConfig().getBoolean ("Downgrade repairs") && !player.hasPermission ("enchlimiter.repairs.nodowngrade")) {
+							ItemStack testItem = result.clone();
+							if (fixItem (testItem, player) && !hasIllegalEnchant (testItem, player)) {
+								event.setCurrentItem (testItem); result = testItem; 
+								return;
+							}
+						} else {
+							log.info ("Allowing repair by " + player.getName() + " of " + slot0.getType());
+							return;
+						}
+					} 
+					// else it is still illegal and will be returned by block of code below
+				}
+				else 	// nothing to do
+					return;
+			}
+				
 			if (hasIllegalEnchant (result, player))
 			{
 				final int playerXP = prevXP.get (player.getUniqueId());
@@ -315,7 +344,6 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				if (tool.getType() == book.getType() && tool.getDurability() == 0 && book.getDurability() == 0) {
 					// log.info ("Enchant combo attempt of " + tool.getType());
 					for (Enchantment e: book.getEnchantments().keySet()) {
-						//*DEBUG*/log.info ("testing for " + e + "-" + bookStore.getStoredEnchantLevel(e));
 						if (disallowedEnchants.containsKey (e)) {
 							if (disallowedEnchants.get(e) <= book.getEnchantmentLevel(e) )
 								disallowed = true; // second item alone too high
@@ -406,7 +434,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 	
 	@EventHandler (ignoreCancelled = true)
 	void itemMonitor (ItemSpawnEvent event) {
-		if (fixOrTestItem (event.getEntity().getItemStack(), null)) {
+		if (getConfig().getBoolean ("Fix spawned items") && fixItem (event.getEntity().getItemStack(), null)) {
 			// log.info ("Modified enchants on spawned " + event.getEntity().getItemStack().getType());
 		}
 	}
@@ -418,7 +446,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		Player player = event.getPlayer();
 		ItemStack item = event.getItem().getItemStack();
 
-		if (fixOrTestItem (item, player)) {
+		if (fixOrTestItem (item, player, getConfig().getBoolean ("Stop pickup"))) {
 			if (getConfig().getBoolean ("Stop pickup")) {
 				event.setCancelled (true);
 				
@@ -469,29 +497,38 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 	}	
 	
 	// returns true if item has enchants on disallowed list or multiple when not allowed
-	//  if "Stop pickup" is NOT set, will remove disallowed enchants
-	boolean fixOrTestItem (ItemStack item, Player p) {
-		boolean testOnly = getConfig().getBoolean ("Stop pickup", true);
-		
+	boolean fixItem (ItemStack item, Player p) {
+		return fixOrTestItem (item, p, false);
+	}
+	//  if testOnly is false, will remove disallowed enchants
+	boolean fixOrTestItem (ItemStack item, Player p, boolean testOnly) {	
 		boolean limitMultiples = getConfig().getBoolean ("Limit Multiples", true) && 
 			(p == null || ! p.hasPermission ("enchlimiter.multiple"));
 		
 		int enchants = 0;
 		
+		ItemMeta meta = item.getItemMeta();
+		if ( meta instanceof EnchantmentStorageMeta) {
+			if ( !((EnchantmentStorageMeta)meta).hasStoredEnchants())
+				return false; // nothing to do
+			else
+			  	return fixOrTestBook (item, p, testOnly);
+		} 
+
 		// Get List of disallowed enchants for that item and for ALL items
 		Map<Enchantment, Integer> disallowedEnchants = getDisallowedEnchants (item.getType());
 		disallowedEnchants.putAll (getDisallowedEnchants ("ALL"));
-		//*DEBUG*/log.info ("disallowed on " + item.getType() + disallowedEnchants);
+		//*DEBUG*/log.info ("disallowed on " + item.getType() + disallowedEnchants);		
 		
-		if ( !item.getItemMeta().hasEnchants() || (!limitMultiples && disallowedEnchants.isEmpty()))
+		if ( !meta.hasEnchants() || (!limitMultiples && disallowedEnchants.isEmpty()))
 			return false;  // nothing to do; leave event alive for another plugin
 		boolean modified = false;
 						
-		Map<Enchantment,Integer> toAdd = new HashMap<Enchantment, Integer>();
-		toAdd.putAll (item.getEnchantments()); // to avoid modifying while iterating
+		Map<Enchantment,Integer> onItem = new HashMap<Enchantment, Integer>();
+		onItem.putAll (item.getEnchantments()); // to avoid modifying while iterating
 			
-		for (Enchantment ench : toAdd.keySet()) {
-			int level = toAdd.get(ench);
+		for (Enchantment ench : onItem.keySet()) {
+			int level = onItem.get(ench);
 
 			if ( !limitMultiples || enchants == 0) {
 				if (disallowedEnchants.containsKey (ench) && level >= disallowedEnchants.get (ench) &&
@@ -532,7 +569,82 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		} 		
 		return modified;
 	}
-	
+	// returns true if item has enchants on disallowed list or multiple when not allowed
+	boolean fixBook (ItemStack item, Player p) {
+		return fixOrTestBook (item, p, false);
+	}
+	// returns true if book has stored enchants on disallowed list or multiple when not allowed
+	//  if "Stop pickup" is NOT set, will remove disallowed enchants
+	//  expects only to be called with an ENCHANTED_BOOK
+	boolean fixOrTestBook (ItemStack item, Player p, boolean testOnly) {
+		if (item.getType() != Material.ENCHANTED_BOOK) {
+			log.warning ("fixOrTestBook called with " + item.getType());
+			return false;
+		}		
+		boolean limitMultiples = getConfig().getBoolean ("Limit Multiples", true) && 
+			(p == null || ! p.hasPermission ("enchlimiter.multiple"));
+		
+		int enchants = 0;
+		EnchantmentStorageMeta meta = (EnchantmentStorageMeta)item.getItemMeta();
+
+		// Get List of disallowed enchants for Enchanted_Book, Book, and ALL
+		Map<Enchantment, Integer> disallowedEnchants = getDisallowedEnchants (item.getType());
+		disallowedEnchants.putAll (getDisallowedEnchants ("BOOK"));
+		disallowedEnchants.putAll (getDisallowedEnchants ("ALL"));
+		//*DEBUG*/log.info ("disallowed on " + item.getType() + disallowedEnchants);		
+		
+		if ( !meta.hasStoredEnchants() || (!limitMultiples && disallowedEnchants.isEmpty()))
+			return false;  // nothing to do; leave event alive for another plugin
+		boolean modified = false;
+						
+		Map<Enchantment,Integer> onItem = new HashMap<Enchantment, Integer>();
+		onItem.putAll (meta.getStoredEnchants()); // to avoid modifying while iterating
+			
+		for (Enchantment ench : onItem.keySet()) {
+			int level = onItem.get(ench);
+
+			if ( !limitMultiples || enchants == 0) {
+				if (disallowedEnchants.containsKey (ench) && level >= disallowedEnchants.get (ench) &&
+					(p == null || ! p.hasPermission ("enchlimiter.disallowed")) ) 
+				{
+					if (testOnly) {
+						return true;
+					}
+					else
+						modified = true;
+						
+					meta.removeStoredEnchant (ench);
+					// Add back at lower level, if possible
+					if (disallowedEnchants.get (ench) > 1)
+						meta.addStoredEnchant (ench, disallowedEnchants.get (ench) - 1, true);
+					
+					if (getConfig().getBoolean ("Message on disallowed", true) && p != null)
+						p.sendMessage (language.get (p, "disallowed3", 
+									   chatName + " removed disallowed {0}-{1} from {2}", ench.getName(), level, item.getType() ));
+				}
+				else {
+					enchants++;
+					//*DEBUG*/log.info ("Added " + ench + "s-" + level + " to " +item.getType());
+				}
+			} else {
+				if (testOnly) {
+					return true;
+				}
+				else
+					modified = true;
+					
+				meta.removeStoredEnchant (ench);					
+
+				if (getConfig().getBoolean ("Message on limit", true) && p != null)
+					p.sendMessage (language.get (p, "limited3", 
+									chatName + " removed multiple {0}-{1} from {2}", ench.getName(), level, item.getType() ));
+			}
+		} 
+		if (modified)
+			item.setItemMeta (meta);
+					
+		return modified;
+	}	
 	public static boolean isHelmet (Material type) {
 		switch (type) {
 			case LEATHER_HELMET:
@@ -765,68 +877,6 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		}
 	}		
 
-    void sendMsg (CommandSender requestor, String msg)
-	{
-		if (requestor == null)
-			return;
-			
-		if (requestor instanceof Player) {
-			requestor.sendMessage (msg);
-		}
-		else // Server console. Color codes may look nice on a terminal, but not on text file
-		{
-			requestor.sendMessage(ChatColor.stripColor (msg));
-		}
-	}
-
-    @Override
-    public boolean onCommand(CommandSender sender, Command command, String commandLabel, String[] args) {
-        String commandName = command.getName().toLowerCase();
-        String[] trimmedArgs = args;
-
-        if (commandName.equals("el")) {
-            return elCommands(sender, trimmedArgs);
-		}
-		return false;
-	}
-
-    private boolean elCommands(CommandSender sender, String[] args) {	
-		if (args.length == 0) 
-			return false; // print usage
-
-		String commandName = args[0].toLowerCase();
-        if (commandName.equals("print")) {
-			sender.sendMessage ("print not yet implemented");
-            return true; // printConfig (sender);
-		}
-		else if (commandName.equals("reload")) {
-			this.reloadConfig();
-			this.checkConfig();
-			return true;									
-		}
-		else if (commandName.equals("save")) {
-			this.saveConfig();
-			return true;									
-		}
-/**
-		else if (commandName.equals ("boolean")) {
-			boolean ifSet = this.getConfig().getBoolean ("nerf_fire.nostartby.op");
-			
-			if (args.length == 1) {
-				sendMsg (sender, "OPs are " + (ifSet ? "" : ChatColor.RED + "NOT " + ChatColor.RESET) + "allowed to start fires");
-				return true;
-			}
-			// else have a param
-			boolean turnOn = args[1].toLowerCase().equals ("true");
-			this.getConfig().set ("nerf_fire.nostartby.op", !turnOn);
-			sendMsg (sender, ChatColor.BLUE + "nerf_fire.nostartby.op" + ChatColor.DARK_BLUE + 
-								" now " + ChatColor.GRAY + !turnOn);
-			return true;
-		}				
-**/
-		return false;
-	}
-			
 	public void onEnable()
 	{
 		log = this.getLogger();
@@ -846,6 +896,8 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		addNewLanguages();		
 			
 		getServer().getPluginManager().registerEvents ((Listener)this, this);
+		getCommand("el").setExecutor(new EnchLimiterCommandExecutor(this));
+
 		log.info (language.get (Bukkit.getConsoleSender(), "enabled", "EnchantLimiter in force; by Filbert66"));
 	}
 

@@ -1,10 +1,11 @@
 # 27 Feb 2014 : PSW :  New
 # 24 Apr 2014 : PSW :  Added .disallowed
 # 07 Jul 2014 : PSW :  Added commands
+# 13 Jul 2014 : PSW :  Added enchlimiter.repairs and 'el set' syntax
 
 name: EnchLimiter
 main: com.yahoo.phil_work.enchlimiter.EnchLimiter
-version: 1.1
+version: 1.2
 author: filbert66
 description: Limits enchants by multiples or configured list
 website: dev.bukkit.org/bukkit-plugins/enchlimiter
@@ -30,11 +31,17 @@ permissions:
   enchlimiter.el:
     description: Permits the admin commands
     default: op
-
+  enchlimiter.repairs:
+    description: Permits repairs of illegal items
+    default: op
+  enchlimiter.repairs.nodowngrade:
+    description: If 'Downgrade repairs' is true, it is ignored
+    default: op
+    
 commands:
    el:
       description: This is the admin enchlimiter interface
       aliases: enchlimiter
-      usage: /<command> reload
+      usage: /<command> reload|save|set (multiples|pickup|punish|spawns|repairs|downgrade|(message [cancel|limit|disallowed]) [true|on|false|off])
       permission: enchlimiter.el
       permission-message: You don't have <permission>

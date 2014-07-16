@@ -4,3 +4,6 @@ Message on disallowed: true
 Limit Multiples: true
 Stop pickup: false
 Restore levels: true
+Stop repairs: true
+Fix spawned items: false
+Downgrade repairs: true
