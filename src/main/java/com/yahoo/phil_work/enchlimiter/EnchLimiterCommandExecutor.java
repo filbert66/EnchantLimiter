@@ -90,7 +90,8 @@ public class EnchLimiterCommandExecutor implements CommandExecutor {
 				shortNameMap.put ("pickup", "Stop pickup");
 				
 				shortNameMap.put ("downgrade", "Downgrade repairs");
-				if ( !(fieldName.equals ("downgrade")))
+				shortNameMap.put ("infinite", "Infinite anvils");
+				if ( !(fieldName.equals ("downgrade") || fieldName.equals ("infinite")))
 					invert = true;	// syntax above 'set multiples true' means don't limit
 					
 				configName = shortNameMap.get (fieldName);

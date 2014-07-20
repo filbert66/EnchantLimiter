@@ -17,7 +17,11 @@
  *  07 Jul 2014 : Added better check on anvil MOVE_TO_OTHER_INVENTORY;
  *              : Added commands, only reload for now.
  *  12 Jul 2014 : Moved commands to separate class; fixed bugs with books.
- *              : Added 'Downgrade repairs', and 'Allow repairs'
+ *              : Added 'Downgrade repairs', and 'Allow repairs'.
+ *  16 Jul 2014 : craftMonitor: Added nullcheck on player.
+ *  18 Jul 2014 : Fixed Shift-click on result; space in dirname; repair anvil on cancelled enchant; fixed couple NPEs.
+ *              : Allow either BOOK or ENCHANTED_BOOK config entries to be equivalent.
+ *              : Added 'Infinite anvils' feature.
  *
  * Bukkit BUG: Sometimes able to place items in Anvil & do restricted enchant; no ItemClickEvent!
  * 
@@ -35,6 +39,7 @@ import com.yahoo.phil_work.LanguageWrapper;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.net.URLDecoder;
 import java.util.Collections;
 import java.util.List;
 import java.util.logging.Logger;
@@ -43,6 +48,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
+import org.bukkit.block.Block;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
@@ -167,11 +173,14 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 	
 	// Is set with ClickEvent, when placing in crafting slot of an anvil.
 	private static Map <UUID, Integer> prevXP = new HashMap<UUID, Integer>();
-	
+	private static Map <UUID, Byte> prevAnvilData = new HashMap<UUID, Byte>();
+
 	@EventHandler (ignoreCancelled = true) 
 	void closeAnvilMonitor (InventoryCloseEvent event) {
-		if (event.getInventory().getType()== InventoryType.ANVIL)
+		if (event.getInventory().getType()== InventoryType.ANVIL) {
 			prevXP.remove (event.getPlayer().getUniqueId());
+			prevAnvilData.remove (event.getPlayer().getUniqueId());
+		}
 	}
 	
 	//  Listen to PrepareItemCraftEvent and return one of the books 
@@ -183,7 +192,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		boolean limitMultiples = getConfig().getBoolean ("Limit Multiples", true);
 	
 		//log.info ("InventoryClickEvent " +event.getAction()+" in type " + inv.getType() + " in  slot " + event.getRawSlot() + "(raw " + event.getSlot()+ ") slotType "+ event.getSlotType());
-		InventoryAction action = event.getAction();
+		final InventoryAction action = event.getAction();
 		boolean isPlace = false;
 		switch (action) {
 			case PLACE_ALL:
@@ -204,6 +213,10 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			log.warning (human + " clicked on anvil, not a Player");
 			return;
 		}
+		else if (human == null) {
+			log.warning ("Null player; cannot run");
+			return;
+		}
 		
 		/* Sometimes, Bukkit client places item in crafting without giving server event.
 		 * Hence, add double-check to see if they just crafted an illegal item. If this works well, could remove 
@@ -212,7 +225,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		 *   and then restore that if they've crafted something illegal. 
 		 */
 		if (inv.getType()== InventoryType.ANVIL && event.getSlotType() == SlotType.RESULT) {
-			// log.info ("Looks like you " + action + " " + event.getSlotType() + " " + event.getCurrentItem() + " with " + event.getCursor() + " on cursor");
+			//log.info ("Looks like you " + action + " " + event.getSlotType() + " " + event.getCurrentItem() + " with " + event.getCursor() + " on cursor");
 			ItemStack[] anvilContents = inv.getContents();
 			final ItemStack slot0 = anvilContents[0];
 			final ItemStack slot1 = anvilContents[1];
@@ -220,8 +233,19 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 
 			//log.info ("Crafted from 0: " + slot0);
 			//log.info ("Crafted from 1: " + slot1);
-			
-			boolean isRepair = (slot0.getType() == slot1.getType() && slot0.getDurability() > 0 && !slot1.getItemMeta().hasEnchants());
+
+			// New feature: infinite anvil
+			if (getConfig().getBoolean ("Infinite anvils")) {
+				Block anvilBlock = player.getTargetBlock(null, 6);
+				if (anvilBlock != null && anvilBlock.getType() == Material.ANVIL) {	
+					log.info ("Current anvil data: " + anvilBlock.getData());			
+					anvilBlock.setData ((byte)(anvilBlock.getData () & 0x03));  // 0=undamaged; bits 0-1 are compass orientation on Block
+				} else
+					log.warning ("Cannot find anvil to repair");
+			}			
+
+			// Add null check for item naming
+			boolean isRepair = (slot0 != null && slot1 != null && slot0.getType() == slot1.getType() && slot0.getDurability() > 0 && !slot1.getItemMeta().hasEnchants());
 			if (isRepair) {
 				if (hasIllegalEnchant (slot0, player)) {
 					if ( !getConfig().getBoolean ("Stop repairs") || player.hasPermission ("enchlimiter.repairs")) {
@@ -244,7 +268,25 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				
 			if (hasIllegalEnchant (result, player))
 			{
-				final int playerXP = prevXP.get (player.getUniqueId());
+				Integer ti = prevXP.get (player.getUniqueId());
+				if (ti == null)
+					log.warning ("Cannot restore XP; didn't record on place");
+				final int playerXP = (ti != null? ti : player.getLevel());
+				final PlayerInventory pinv = player.getInventory();
+				final ItemStack crafted = result;
+				
+				// Repair anvil before it is destroyed and can't return item in runLater task
+				Block anvilBlock = player.getTargetBlock(null, 6);
+				if (anvilBlock != null && anvilBlock.getType() == Material.ANVIL) {
+					Byte pData = prevAnvilData.get (player.getUniqueId());
+					if (pData != null) {
+						anvilBlock.setData (pData);
+						// log.info ("restored anvil data to " + pData);
+					} else
+						log.warning ("Don't have stored anvil repair state to restore");
+				} else
+					log.warning ("Cannot find anvil to repair");
+				
 				class anvilUndoer extends BukkitRunnable {
 					@Override
 					public void run() {
@@ -253,14 +295,33 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 							return;
 						}
 						if (player.getOpenInventory().getTopInventory().getType() != InventoryType.ANVIL) {
-							//*DEBUG*/log.info (player.getName() + " closed inventory before enchant occurred");
+							log.warning (player.getName() + " closed inventory or anvil died and got an illegal item:" + crafted);
 							return;
 						}
 						AnvilInventory aInventory = (AnvilInventory)player.getOpenInventory().getTopInventory();
 						InventoryView pInventory = player.getOpenInventory();
 
 						// Execute cancel
-						pInventory.setCursor (null); // take away illegal item
+						if (action == InventoryAction.MOVE_TO_OTHER_INVENTORY) {
+							// When shift-click, item is not on cursor but already in inventory/hotbar. 
+							boolean found = false;
+							//log.info ("Looking in pinv for: " + crafted);
+							for (int i = 0; i < pinv.getSize(); i++) 
+								// Use isSimilar because result is quantity zero (0)!
+								if (crafted.isSimilar (pinv.getItem (i))) {
+									pinv.clear (i);
+									// log.info ("Found and removed illegal item in raw slot " + i);		
+									found = true;
+									break;
+								} else if (pinv.getItem(i) != null) {
+								//	log.info (i + ": inv " + pinv.getItem(i) + " is not result ");
+								}
+
+							if (!found)
+								log.warning ("could not find illegal result in inventory on shift-click by " + player.getName());								
+						} else
+							pInventory.setCursor (null); // take away illegal item in hand
+						
 						aInventory.setItem(0, slot0); // return craft ingredient 1
 						aInventory.setItem(1, slot1); // return craft ingredient 2
 						if (getConfig().getBoolean ("Restore levels"))
@@ -281,10 +342,20 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			ItemStack slot0 = anvilContents[0];
 			ItemStack slot1 = anvilContents[1];
 			
+			/*** DEBUG 
+			Block anvilBlock = player.getTargetBlock(null, 6);
+			if (anvilBlock != null && anvilBlock.getType() == Material.ANVIL) {	
+				log.info ("Current anvil data: " + anvilBlock.getData());			
+			} 
+			***/
+
 			if (isPlace) {
 				// Remember for later, in case we need it. 
 				Integer curXP = player.getLevel();	// need to get/set levels, not XP (progress to next)
 				prevXP.put (player.getUniqueId(), curXP);
+				Block anvil = player.getTargetBlock (null,6);
+				if (anvil != null && anvil.getType() == Material.ANVIL)
+					prevAnvilData.put (player.getUniqueId(), anvil.getData());
 				//*DEBUG*/ log.info ("saved XP at " + curXP);
 				
 				// log.info ("Placed a " + event.getCursor() + " in slot " + event.getRawSlot());
@@ -768,13 +839,19 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 
 		try {  //iterate through added languages
 			String classURL = this.getClass().getResource(this.getName()+".class").toString();
-			String jarName = classURL.substring (classURL.lastIndexOf (':') + 1, classURL.indexOf ('!'));
-			ZipInputStream jar = new ZipInputStream (new FileInputStream (jarName));
+			String jarName = URLDecoder.decode(classURL, "UTF-8").substring (classURL.lastIndexOf (':') + 1, classURL.indexOf ('!'));
+			ZipInputStream jar;
+			try {
+				jar = new ZipInputStream (new FileInputStream (jarName));
+			} catch (java.io.FileNotFoundException ex) {
+				log.warning ("Cannot find jar file: '" + jarName + "'");						
+				return;
+			}
 			if (jar != null) {
 				ZipEntry e = jar.getNextEntry();
 				while (e != null)   {
 					String name = e.getName();
-					if (name.startsWith ("languages/") && !new File (pluginPath + name).exists()) 
+					if (name.startsWith ("languages" + getDataFolder().separator) && !new File (pluginPath + name).exists()) 
 					{
 						saveResource (name, false);
 						log.info ("Adding language file: " + name);
@@ -783,7 +860,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				}
 			}
 			else 
-				log.warning ("Unable to open jar file");						
+				log.warning ("Unable to open jar file: '" + jarName + "'");						
 		} catch (Exception ex) {
 			log.warning ("Unable to process language files: " + ex);		
 		}	
@@ -822,7 +899,13 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		HashMap<Enchantment, Integer> results = new HashMap<Enchantment, Integer>();
 		String matString = m.toString();
 
-		if (isSword (m))
+		// BOOK should apply to Enchanted_BOOK, and v.v.
+		if (m == Material.BOOK)
+			results.putAll (getDisallowedEnchants ("ENCHANTED_BOOK"));
+		else if (m == Material.ENCHANTED_BOOK)
+			results.putAll (getDisallowedEnchants ("BOOK"));
+			
+		else if (isSword (m))
 			results.putAll (getDisallowedEnchants ("ALL_SWORDS"));
 		else if (isSpade (m)) {
 			results.putAll (getDisallowedEnchants ("ALL_SPADES"));
@@ -905,6 +988,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 	public void onDisable()
 	{
 		prevXP.clear();
+		prevAnvilData.clear();
 		lastMsg.clear();
 	}
 }

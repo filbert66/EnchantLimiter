@@ -1,0 +1,33 @@
+1.2: Many changes, but not all tested
+* //Fixed//: NPE when enchanting books with a disallowed enchant > 1. [[/bukkit-plugins/ench-limiter/tickets/2-error-when-enchanting-books/|Ticket 2]].
+* //Added//: 
+** **Allow repairs**: new config item that allows repairing disallowed items in an anvil. Default = //false//
+*** note that repairs are defined as same items in each slot, rightmost item has no enchants. Anything else might be an attempt to boost enchants.
+**** this does mean that some repairs won't work, such as two identically enchanted items except for wear. It's costly to repair this way; suggest repairing each tool individually
+*** related new permission, **enchlimiter.repairs**, allows repairs even if not configured to.
+** **Downgrade repairs**: new config item that downgrades repaired items until they are legal; if that is not possible, repair is disallowed
+*** only active when **Allow repairs** is //true//
+*** related new permission, ** enchlimiter.repairs.nodowngrade** ignores if **Downgrade repairs** is true.
+** ** Fix spawned items**: new config flag, which if you set to //true// will allow disallowed spawned items. Default //false//.
+*** impacts any item "dropped" like mob drops, player drops, or fishing. 
+*** this behavior used to be the case when **Stop pickup** was //true//; now you have individual control.
+** **set** command of base **el** command permits changing boolean configuration values
+*** requires further to detail desired boolean:
+*** **multiples on|true** allows multiple enchanted items. Use //off// or //false// to restrict multiples.
+*** **multiples|pickup|punish|repairs|downgrade
+*** **pickup on|true** allows pickup of disallowed items, which will then be "fixed" so they can be used
+**** set to //off|false// to disallow pickup of illegal enchanted items.
+*** **punish on|true** allows punishing the player (not restoring XP) who attempted an illegal anvil action
+*** **repairs on** enables repair protections; set //off|false// to permit players to repair (but not create) disallowed items
+*** **spawns on|true** allows spawned items to have disallowed enchants
+**** set to //off|false// to downgrade or remove disallowed enchants on spawned items
+*** **downgrade on** when repairs are allowed, will attempt to downgrade repair to allowed level. 
+**** if cannot downgrade (ex. disallowed level is 1) the repair will not be allowed.
+**** effectively sets **Downgrade repairs** config item.
+*** **message** option allows setting one of three 'Message' config items
+**** **message cancel** //true// enables **Message on cancel**
+**** **message limit //true// enables **Message on limit**
+**** **message disallowed //true// enables **Message on disallowed**
+** **save** command of base **el** command permits saving your changed configuration to config.yml
+
+
