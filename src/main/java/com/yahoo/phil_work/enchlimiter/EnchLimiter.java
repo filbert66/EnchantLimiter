@@ -22,10 +22,15 @@
  *  18 Jul 2014 : Fixed Shift-click on result; space in dirname; repair anvil on cancelled enchant; fixed couple NPEs.
  *              : Allow either BOOK or ENCHANTED_BOOK config entries to be equivalent.
  *              : Added 'Infinite anvils' feature.
+ *  20 Jul 2014 : Fixed book+book > disallowed level in anvil.
  *
  * Bukkit BUG: Sometimes able to place items in Anvil & do restricted enchant; no ItemClickEvent!
  * 
  * TODO: 
+ *   replace Downgrade repairs with Downgrade in anvil which if true, downgrades to allowed enchants, if possible, vs. when false, always rejects a disallowed result.
+ *   allow for different groups of disallowed and permitted enchants
+ *   commands for modifying 'Disallowed enchants'
+ * 
  *   Disallow equipping restricted item. But To block a player from wearing something is necessary to listen:
 		InventoryClick (put it on classic way)
 		PlayerInteract (righ click with it in hand)
@@ -409,6 +414,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			Map<Enchantment, Integer> disallowedEnchants = getDisallowedEnchants (tool.getType());
 			disallowedEnchants.putAll (getDisallowedEnchants ("ALL"));
 			boolean disallowed = false;
+			boolean bookPlusBook = (book.getType() == Material.ENCHANTED_BOOK && tool.getType() == Material.ENCHANTED_BOOK);
 									
 			ItemMeta meta = book.getItemMeta();
 			if ( !(meta instanceof EnchantmentStorageMeta)) {
@@ -430,7 +436,11 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					if (disallowedEnchants.containsKey (e)) {
 						if (disallowedEnchants.get(e) <= bookStore.getStoredEnchantLevel(e) )
 							disallowed = true; // book too high
-						else if (tool.getEnchantmentLevel (e) >= disallowedEnchants.get(e) - 1)
+						else if (bookPlusBook) {
+							EnchantmentStorageMeta book1 = (EnchantmentStorageMeta)tool.getItemMeta();	
+							if (book1.getStoredEnchantLevel (e) >= disallowedEnchants.get(e) - 1)
+								disallowed = true;	// trying to boost one book with another
+						} else if (tool.getEnchantmentLevel (e) >= disallowedEnchants.get(e) - 1)
 							disallowed = true;	// trying to boost enchant of existing item at limit
 					}
 				}
@@ -438,9 +448,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			if (event.getWhoClicked().hasPermission ("enchlimiter.disallowed"))
 				disallowed = false;
 		
-			if (disallowed || 
-			    (limitMultiples && 
-				 (book.getType() == Material.ENCHANTED_BOOK && tool.getType() == Material.ENCHANTED_BOOK) ) )
+			if (disallowed || (limitMultiples && bookPlusBook))
 			{
 				final ItemStack slot0 = tool.clone(), slot1 = book;
 				final boolean disallowedEntry = disallowed;
@@ -540,6 +548,14 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			(p == null || ! p.hasPermission ("enchlimiter.multiple"));
 		if (item == null || !item.hasItemMeta())
 			return false;
+		
+		ItemMeta meta = item.getItemMeta();
+		if ( meta instanceof EnchantmentStorageMeta) {
+			if ( !((EnchantmentStorageMeta)meta).hasStoredEnchants())
+				return false; // nothing to do
+			else
+			  	return fixOrTestBook (item, p, true); // testonly
+		} 
 			
 		// Get List of disallowed enchants for that item and for ALL items
 		Map<Enchantment, Integer> disallowedEnchants = getDisallowedEnchants (item.getType());
@@ -659,8 +675,8 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		EnchantmentStorageMeta meta = (EnchantmentStorageMeta)item.getItemMeta();
 
 		// Get List of disallowed enchants for Enchanted_Book, Book, and ALL
-		Map<Enchantment, Integer> disallowedEnchants = getDisallowedEnchants (item.getType());
-		disallowedEnchants.putAll (getDisallowedEnchants ("BOOK"));
+		Map<Enchantment, Integer> disallowedEnchants = getDisallowedEnchants (item.getType()); // ENCHANTED_BOOK
+		disallowedEnchants.putAll (getDisallowedEnchants ("BOOK")); // +BOOK
 		disallowedEnchants.putAll (getDisallowedEnchants ("ALL"));
 		//*DEBUG*/log.info ("disallowed on " + item.getType() + disallowedEnchants);		
 		
@@ -842,7 +858,8 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			String jarName = URLDecoder.decode(classURL, "UTF-8").substring (classURL.lastIndexOf (':') + 1, classURL.indexOf ('!'));
 			ZipInputStream jar;
 			try {
-				jar = new ZipInputStream (new FileInputStream (jarName));
+				File f = new File (jarName);
+				jar = new ZipInputStream (new FileInputStream (f));
 			} catch (java.io.FileNotFoundException ex) {
 				log.warning ("Cannot find jar file: '" + jarName + "'");						
 				return;
