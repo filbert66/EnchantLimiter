@@ -5,6 +5,11 @@ import me.xhawk87.LanguageAPI.PluginLanguageLibrary;
 import org.bukkit.Bukkit;
 import org.bukkit.command.CommandSender;
 import org.bukkit.plugin.Plugin;
+import java.io.File;
+import java.io.FileInputStream;
+import java.net.URLDecoder;
+import java.util.logging.Logger;
+import java.util.zip.*;
 
 /**
  * LanguageWrapper
@@ -37,6 +42,41 @@ public class LanguageWrapper {
             langObj = new PluginLanguageLibrary(plugin, ISOCode.findMatch(code));
         }
     }
+    
+	public void addNewLanguages () {
+		final String Slash = plugin.getDataFolder().separator;
+		final String pluginPath = "plugins"+ Slash + plugin.getDataFolder().getName() + Slash;
+		Logger log = plugin.getLogger();
+
+		try {  //iterate through added languages
+			String classURL = plugin.getClass().getResource(plugin.getName()+".class").toString();
+			String jarName = classURL.substring (classURL.lastIndexOf (':') + 1, classURL.indexOf ('!'));
+			ZipInputStream jar;
+			try {
+				File f = new File (jarName.replaceAll("%20", " ")); // toURI() supposed to catch this, but wasn't
+				jar = new ZipInputStream (new FileInputStream (f));
+			} catch (java.io.FileNotFoundException ex) {
+				log.warning ("Cannot find jar file: '" + jarName + "'");						
+				return;
+			}
+			if (jar != null) {
+				ZipEntry e = jar.getNextEntry();
+				while (e != null)   {
+					String name = e.getName();
+					if (name.startsWith ("languages" + Slash) && !new File (pluginPath + name).exists()) 
+					{
+						plugin.saveResource (name, false);
+						log.info ("Adding language file: " + name);
+					}
+					e = jar.getNextEntry();
+				}
+			}
+			else 
+				log.warning ("Unable to open jar file: '" + jarName + "'");						
+		} catch (Exception ex) {
+			log.warning ("Unable to process language files: " + ex);		
+		}	
+	}		
 
     /**
      * A wrapper for the PluginLanguageLibrary.get method. It checks if the

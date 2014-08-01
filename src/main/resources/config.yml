@@ -7,3 +7,5 @@ Restore levels: true
 Stop repairs: true
 Fix spawned items: false
 Downgrade repairs: true
+Infinite anvils: false
+Fix held items: false

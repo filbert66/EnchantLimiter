@@ -11,3 +11,5 @@ disallowed3: §9EnchLimiter§r removed disallowed {0}-{1} from {2}
 multiplePickup: §9EnchLimiter§r: can't pickup item with multiple enchants
 limited3: §9EnchLimiter§r removed multiple {0}-{1} from {2}
 disallowedPickup1: §9EnchLimiter§r: can't pickup {0} with disallowed enchant(s)
+theft: {0} closed inventory or anvil died and got an illegal item: {1}
+nofix: §9EnchLimiter§r: nothing to fix

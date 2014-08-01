@@ -23,6 +23,8 @@
  *              : Allow either BOOK or ENCHANTED_BOOK config entries to be equivalent.
  *              : Added 'Infinite anvils' feature.
  *  20 Jul 2014 : Fixed book+book > disallowed level in anvil.
+ *  27 Jul 2014 : Added PlayerHeldEvent fixer; added Anvil & Table disallowed lists;
+ *                Added Groups within disallowed lists; added "ALL_BARDING"
  *
  * Bukkit BUG: Sometimes able to place items in Anvil & do restricted enchant; no ItemClickEvent!
  * 
@@ -43,21 +45,23 @@ package com.yahoo.phil_work.enchlimiter;
 import com.yahoo.phil_work.LanguageWrapper;
 
 import java.io.File;
-import java.io.FileInputStream;
-import java.net.URLDecoder;
 import java.util.Collections;
 import java.util.List;
+import java.util.HashSet;
 import java.util.logging.Logger;
-import java.util.zip.*;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.io.FileInputStream;
+import java.net.URLDecoder;
+import java.util.zip.*;
 
 import org.bukkit.block.Block;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.inventory.*;
 import org.bukkit.inventory.meta.EnchantmentStorageMeta;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -76,6 +80,7 @@ import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.PrepareItemCraftEvent;
 import org.bukkit.event.inventory.InventoryType.SlotType;
 import org.bukkit.event.player.PlayerPickupItemEvent;
+import org.bukkit.event.player.PlayerItemHeldEvent;
 import org.bukkit.Material;
 import org.bukkit.plugin.*;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -83,10 +88,11 @@ import org.bukkit.plugin.PluginLogger;
 import org.bukkit.scheduler.BukkitRunnable;
 
 import com.yahoo.phil_work.enchlimiter.EnchLimiterCommandExecutor;
+import com.yahoo.phil_work.enchlimiter.EnchLimiterFixCommand;
 
 public class EnchLimiter extends JavaPlugin implements Listener {
 	public Logger log;
-	private LanguageWrapper language;
+	public LanguageWrapper language;
     public String chatName;
 
 	boolean hasAndDeductXP (final Player player, int levels) {
@@ -113,9 +119,8 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		ItemStack item = event.getItem();
 		
 		// Get List of disallowed enchants for that item and for ALL items
-		Map<Enchantment, Integer> disallowedEnchants = getDisallowedEnchants (item.getType());
-		disallowedEnchants.putAll (getDisallowedEnchants ("ALL"));
-		//*DEBUG*/log.info ("disallowed on " + item.getType() + disallowedEnchants);
+		Map<Enchantment, Integer> disallowedEnchants = getDisallowedTableEnchants (item.getType(), player);
+		log.config ("disallowed on " + item.getType() + disallowedEnchants);
 		
 		if ( !limitMultiples && disallowedEnchants.isEmpty())
 			return;  // nothing to do; leave event alive for another plugin
@@ -252,11 +257,11 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			// Add null check for item naming
 			boolean isRepair = (slot0 != null && slot1 != null && slot0.getType() == slot1.getType() && slot0.getDurability() > 0 && !slot1.getItemMeta().hasEnchants());
 			if (isRepair) {
-				if (hasIllegalEnchant (slot0, player)) {
+				if (hasIllegalAnvilEnchant (slot0, player)) {
 					if ( !getConfig().getBoolean ("Stop repairs") || player.hasPermission ("enchlimiter.repairs")) {
 						if (getConfig().getBoolean ("Downgrade repairs") && !player.hasPermission ("enchlimiter.repairs.nodowngrade")) {
 							ItemStack testItem = result.clone();
-							if (fixItem (testItem, player) && !hasIllegalEnchant (testItem, player)) {
+							if (fixAnvilItem (testItem, player) && !hasIllegalAnvilEnchant (testItem, player)) {
 								event.setCurrentItem (testItem); result = testItem; 
 								return;
 							}
@@ -271,7 +276,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					return;
 			}
 				
-			if (hasIllegalEnchant (result, player))
+			if (hasIllegalAnvilEnchant (result, player))
 			{
 				Integer ti = prevXP.get (player.getUniqueId());
 				if (ti == null)
@@ -300,7 +305,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 							return;
 						}
 						if (player.getOpenInventory().getTopInventory().getType() != InventoryType.ANVIL) {
-							log.warning (player.getName() + " closed inventory or anvil died and got an illegal item:" + crafted);
+							log.warning (language.get (player, "theft", "{0} closed inventory or anvil died and got an illegal item: {1}", player.getName(), crafted));
 							return;
 						}
 						AnvilInventory aInventory = (AnvilInventory)player.getOpenInventory().getTopInventory();
@@ -411,8 +416,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		}
 		if (book != null && tool != null && isPlace)
 		{ 
-			Map<Enchantment, Integer> disallowedEnchants = getDisallowedEnchants (tool.getType());
-			disallowedEnchants.putAll (getDisallowedEnchants ("ALL"));
+			Map<Enchantment, Integer> disallowedEnchants = getDisallowedAnvilEnchants (tool.getType(), player);
 			boolean disallowed = false;
 			boolean bookPlusBook = (book.getType() == Material.ENCHANTED_BOOK && tool.getType() == Material.ENCHANTED_BOOK);
 									
@@ -542,24 +546,33 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			} 
 		}
 	}
-	// returns true if has enchants on disallowed list or multiple when not allowed
-	boolean hasIllegalEnchant (final ItemStack item, final Player p) {
+	
+	@EventHandler (ignoreCancelled = true)
+	void heldMonitor (PlayerItemHeldEvent event) {
+		final Player p = event.getPlayer();
+		ItemStack item = p.getInventory().getItem (event.getNewSlot());
+
+		if (item != null && getConfig().getBoolean ("Fix held items"))		
+			fixItem (item, p);
+	}
+	
+	// returns true if has enchants on global or anvil disallowed list or multiple when not allowed
+	boolean hasIllegalAnvilEnchant (final ItemStack item, final Player p) {
 		boolean limitMultiples = getConfig().getBoolean ("Limit Multiples", true) && 
 			(p == null || ! p.hasPermission ("enchlimiter.multiple"));
 		if (item == null || !item.hasItemMeta())
 			return false;
 		
+		// Get List of disallowed enchants for that item 
+		Map<Enchantment, Integer> disallowedEnchants = getDisallowedAnvilEnchants (item.getType(), p);
+
 		ItemMeta meta = item.getItemMeta();
 		if ( meta instanceof EnchantmentStorageMeta) {
 			if ( !((EnchantmentStorageMeta)meta).hasStoredEnchants())
 				return false; // nothing to do
 			else
-			  	return fixOrTestBook (item, p, true); // testonly
-		} 
-			
-		// Get List of disallowed enchants for that item and for ALL items
-		Map<Enchantment, Integer> disallowedEnchants = getDisallowedEnchants (item.getType());
-		disallowedEnchants.putAll (getDisallowedEnchants ("ALL"));
+			  	return fixOrTestBook (disallowedEnchants, item, p, true); // testonly
+		} 		
 		
 		if ( !item.getItemMeta().hasEnchants() || (!limitMultiples && disallowedEnchants.isEmpty()))
 			return false;  // nothing to do; leave event alive for another plugin
@@ -587,8 +600,22 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 	boolean fixItem (ItemStack item, Player p) {
 		return fixOrTestItem (item, p, false);
 	}
-	//  if testOnly is false, will remove disallowed enchants
+	boolean fixAnvilItem (ItemStack item, Player p) {
+		return fixOrTestAnvilItem (item, p, false);
+	}
 	boolean fixOrTestItem (ItemStack item, Player p, boolean testOnly) {	
+		if (item == null) return false;
+		Map<Enchantment, Integer> disallowedEnchants = getDisallowedEnchants (item.getType(), p);
+		return fixOrTestItem (disallowedEnchants, item, p, testOnly);
+	}
+	boolean fixOrTestAnvilItem (ItemStack item, Player p, boolean testOnly) {	
+		if (item == null) return false;
+		Map<Enchantment, Integer> disallowedEnchants = getDisallowedAnvilEnchants (item.getType(), p);
+		return fixOrTestItem (disallowedEnchants, item, p, testOnly);
+	}
+	// NOTE: PlayerPickup calls this: global only
+	//  if testOnly is false, will remove disallowed enchants
+	boolean fixOrTestItem (Map<Enchantment, Integer> disallowedEnchants, ItemStack item, Player p, boolean testOnly) {	
 		boolean limitMultiples = getConfig().getBoolean ("Limit Multiples", true) && 
 			(p == null || ! p.hasPermission ("enchlimiter.multiple"));
 		
@@ -599,15 +626,10 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			if ( !((EnchantmentStorageMeta)meta).hasStoredEnchants())
 				return false; // nothing to do
 			else
-			  	return fixOrTestBook (item, p, testOnly);
+			  	return fixOrTestBook (disallowedEnchants, item, p, testOnly);
 		} 
-
-		// Get List of disallowed enchants for that item and for ALL items
-		Map<Enchantment, Integer> disallowedEnchants = getDisallowedEnchants (item.getType());
-		disallowedEnchants.putAll (getDisallowedEnchants ("ALL"));
-		//*DEBUG*/log.info ("disallowed on " + item.getType() + disallowedEnchants);		
 		
-		if ( !meta.hasEnchants() || (!limitMultiples && disallowedEnchants.isEmpty()))
+		if (meta == null || !meta.hasEnchants() || (!limitMultiples && disallowedEnchants.isEmpty()))
 			return false;  // nothing to do; leave event alive for another plugin
 		boolean modified = false;
 						
@@ -656,14 +678,10 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		} 		
 		return modified;
 	}
-	// returns true if item has enchants on disallowed list or multiple when not allowed
-	boolean fixBook (ItemStack item, Player p) {
-		return fixOrTestBook (item, p, false);
-	}
 	// returns true if book has stored enchants on disallowed list or multiple when not allowed
 	//  if "Stop pickup" is NOT set, will remove disallowed enchants
 	//  expects only to be called with an ENCHANTED_BOOK
-	boolean fixOrTestBook (ItemStack item, Player p, boolean testOnly) {
+	boolean fixOrTestBook (Map<Enchantment, Integer> disallowedEnchants, ItemStack item, Player p, boolean testOnly) {
 		if (item.getType() != Material.ENCHANTED_BOOK) {
 			log.warning ("fixOrTestBook called with " + item.getType());
 			return false;
@@ -673,12 +691,6 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		
 		int enchants = 0;
 		EnchantmentStorageMeta meta = (EnchantmentStorageMeta)item.getItemMeta();
-
-		// Get List of disallowed enchants for Enchanted_Book, Book, and ALL
-		Map<Enchantment, Integer> disallowedEnchants = getDisallowedEnchants (item.getType()); // ENCHANTED_BOOK
-		disallowedEnchants.putAll (getDisallowedEnchants ("BOOK")); // +BOOK
-		disallowedEnchants.putAll (getDisallowedEnchants ("ALL"));
-		//*DEBUG*/log.info ("disallowed on " + item.getType() + disallowedEnchants);		
 		
 		if ( !meta.hasStoredEnchants() || (!limitMultiples && disallowedEnchants.isEmpty()))
 			return false;  // nothing to do; leave event alive for another plugin
@@ -781,9 +793,18 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				return false;
 		}
 	}
-	// Should check BARDING (horse armor) but don't today
 	public static boolean isArmor (Material type) {
-		return isHelmet(type) || isChestplate (type) || isLeggings(type) || isBoots (type);
+		return isHelmet(type) || isChestplate (type) || isLeggings(type) || isBoots (type) || isBarding(type);
+	}
+	public static boolean isBarding (Material type) {
+		switch (type) {
+			case IRON_BARDING:
+			case GOLD_BARDING: 
+			case DIAMOND_BARDING:
+				return true;
+			default:
+				return false;
+		}
 	}
 	public static boolean isSword (Material type) {
 		switch (type) {
@@ -848,17 +869,19 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				return false;
 		}
 	}
-	
-		
-	private void addNewLanguages () {
-		final String pluginPath = "plugins"+ getDataFolder().separator + getDataFolder().getName() + getDataFolder().separator;
+	public void addNewLanguages (Plugin plugin) {
+		final String Slash = plugin.getDataFolder().separator;
+		final String pluginPath = "plugins"+ Slash + getDataFolder().getName() + Slash;
+		Logger log = plugin.getLogger();
 
 		try {  //iterate through added languages
-			String classURL = this.getClass().getResource(this.getName()+".class").toString();
-			String jarName = URLDecoder.decode(classURL, "UTF-8").substring (classURL.lastIndexOf (':') + 1, classURL.indexOf ('!'));
+			String classURL = plugin.getClass().getResource(plugin.getName()+".class").toString();
+			//log.info ("classURL: " + classURL);
 			ZipInputStream jar;
+			String jarName = classURL.substring (classURL.lastIndexOf (':') + 1, classURL.indexOf ('!'));
 			try {
-				File f = new File (jarName);
+				File f = new File (jarName.replaceAll("%20", " "));
+				//log.info ("File " + f + " exists: " + f.exists());
 				jar = new ZipInputStream (new FileInputStream (f));
 			} catch (java.io.FileNotFoundException ex) {
 				log.warning ("Cannot find jar file: '" + jarName + "'");						
@@ -868,9 +891,9 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				ZipEntry e = jar.getNextEntry();
 				while (e != null)   {
 					String name = e.getName();
-					if (name.startsWith ("languages" + getDataFolder().separator) && !new File (pluginPath + name).exists()) 
+					if (name.startsWith ("languages" + Slash) && !new File (pluginPath + name).exists()) 
 					{
-						saveResource (name, false);
+						plugin.saveResource (name, false);
 						log.info ("Adding language file: " + name);
 					}
 					e = jar.getNextEntry();
@@ -881,20 +904,43 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		} catch (Exception ex) {
 			log.warning ("Unable to process language files: " + ex);		
 		}	
-	}		
-	
-	// Assumes correcting formed string
+	}				
+	/*
+	 * Following getDisallowedEnchants (1) returns only for the global "Disallowed enchants"
+	 *   to find disallowed in an anvil, use getDisallowedAnvilEnchants()
+	 *   to find disallowed in an enchantment table, use getDisallowedTableEnchants()
+	 *     which each return the global *plus* their specific items.
+	 */ 
+	// Assumes correcting formed string, either a material or a permitted "ALL_"
 	private Map<Enchantment, Integer> getDisallowedEnchants (String matString) 
+	{
+		return getDisallowedEnchants (getConfig().getConfigurationSection ("Disallowed enchants"), matString);
+	}
+	private Map<Enchantment, Integer> getDisallowedAnvilEnchants (String matString) 
+	{
+		HashMap<Enchantment, Integer> results = new HashMap<Enchantment, Integer>();
+		results.putAll (getDisallowedEnchants (getConfig().getConfigurationSection ("Disallowed enchants"), matString));
+		results.putAll (getDisallowedEnchants (getConfig().getConfigurationSection ("Disallowed anvil enchants"), matString));
+		return results;
+	}
+	private Map<Enchantment, Integer> getDisallowedTableEnchants (String matString) 
+	{
+		HashMap<Enchantment, Integer> results = new HashMap<Enchantment, Integer>();
+		results.putAll (getDisallowedEnchants (getConfig().getConfigurationSection ("Disallowed enchants"), matString));
+		results.putAll (getDisallowedEnchants (getConfig().getConfigurationSection ("Disallowed table enchants"), matString));
+		return results;
+	}	
+	private Map<Enchantment, Integer> getDisallowedEnchants (ConfigurationSection cs, String matString) 
 	{
 		HashMap<Enchantment, Integer> results = new HashMap<Enchantment, Integer>();
 
-		if ( !getConfig().isConfigurationSection ("Disallowed enchants." + matString))
+		if (cs == null || !cs.isConfigurationSection (matString))
 			return results; // an empty list rather than null
 		
-		for (String enchantString : getConfig().getConfigurationSection ("Disallowed enchants." + matString).getKeys (false)) {
-			int level = getConfig().getInt ("Disallowed enchants." + matString + "." + enchantString);
+		for (String enchantString : cs.getConfigurationSection (matString).getKeys (false)) {
+			int level = cs.getInt (matString + "." + enchantString);
 			if (level < 1) {
-				log.warning ("Unsupported " + matString + "." + enchantString + " enchant level: " + level);
+				log.warning (cs.getCurrentPath()+"."+matString + "." + enchantString + ": " + level + "<- Unsupported enchant level");
 				continue;
 			}
 			Enchantment enchant;
@@ -904,75 +950,144 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				}
 			}		
 			else if ((enchant = Enchantment.getByName (enchantString)) == null)
-				log.warning ("Unknown enchantment: " + enchantString+ ". Refer to http://bit.ly/HxVS58");
+				log.warning (cs.getCurrentPath()+"." +matString + ": Unknown enchantment '" + enchantString+ "'. Refer to http://bit.ly/HxVS58");
 			else {
 				results.put (enchant, level);
 			}
 		}	
 		return results;
 	}
-	private Map<Enchantment, Integer> getDisallowedEnchants (Material m) 
+	private Map<Enchantment, Integer> getDisallowedEnchants (Material m, Player p) 
+	{
+		return getDisallowedEnchants (getConfig().getConfigurationSection ("Disallowed enchants"), m, p);
+	}
+	private Map<Enchantment, Integer> getDisallowedAnvilEnchants (Material m, Player p) 
+	{
+		HashMap<Enchantment, Integer> results = new HashMap<Enchantment, Integer>();
+		results.putAll (getDisallowedEnchants (getConfig().getConfigurationSection ("Disallowed enchants"), m, p));
+		results.putAll (getDisallowedEnchants (getConfig().getConfigurationSection ("Disallowed anvil enchants"), m, p));
+		return results;
+	}
+	private Map<Enchantment, Integer> getDisallowedTableEnchants (Material m, Player p) 
+	{
+		HashMap<Enchantment, Integer> results = new HashMap<Enchantment, Integer>();
+		results.putAll (getDisallowedEnchants (getConfig().getConfigurationSection ("Disallowed enchants"), m, p));
+		results.putAll (getDisallowedEnchants (getConfig().getConfigurationSection ("Disallowed table enchants"), m, p));
+		return results;
+	}		 
+	// Calls previous by converting Material to string, but also adds special "ALL" cases
+	private Map<Enchantment, Integer> getDisallowedEnchants (ConfigurationSection cs, Material m, Player p) 
 	{
 		HashMap<Enchantment, Integer> results = new HashMap<Enchantment, Integer>();
 		String matString = m.toString();
+		if (cs == null)
+			return results; // empty, non-null
 
+		results.putAll (getDisallowedEnchants (cs, "ALL"));
+		
 		// BOOK should apply to Enchanted_BOOK, and v.v.
 		if (m == Material.BOOK)
-			results.putAll (getDisallowedEnchants ("ENCHANTED_BOOK"));
+			results.putAll (getDisallowedEnchants (cs, "ENCHANTED_BOOK"));
 		else if (m == Material.ENCHANTED_BOOK)
-			results.putAll (getDisallowedEnchants ("BOOK"));
+			results.putAll (getDisallowedEnchants (cs, "BOOK"));
 			
 		else if (isSword (m))
-			results.putAll (getDisallowedEnchants ("ALL_SWORDS"));
+			results.putAll (getDisallowedEnchants (cs, "ALL_SWORDS"));
 		else if (isSpade (m)) {
-			results.putAll (getDisallowedEnchants ("ALL_SPADES"));
-			results.putAll (getDisallowedEnchants ("ALL_SHOVELS"));			
+			results.putAll (getDisallowedEnchants (cs, "ALL_SPADES"));
+			results.putAll (getDisallowedEnchants (cs, "ALL_SHOVELS"));			
 		} else if (isHoe (m))
-			results.putAll (getDisallowedEnchants ("ALL_HOES"));
+			results.putAll (getDisallowedEnchants (cs, "ALL_HOES"));
 		else if (isPick (m)) {
-			results.putAll (getDisallowedEnchants ("ALL_PICKS"));
-			results.putAll (getDisallowedEnchants ("ALL_PICKAXES"));
+			results.putAll (getDisallowedEnchants (cs, "ALL_PICKS"));
+			results.putAll (getDisallowedEnchants (cs, "ALL_PICKAXES"));
 		} else if (isAxe (m))
-			results.putAll (getDisallowedEnchants ("ALL_AXES"));	
+			results.putAll (getDisallowedEnchants (cs, "ALL_AXES"));	
 		else if (isArmor (m)) {
-			results.putAll (getDisallowedEnchants ("ALL_ARMOR"));	
+			results.putAll (getDisallowedEnchants (cs, "ALL_ARMOR"));	
 			
 			if (isHelmet (m))
-				results.putAll (getDisallowedEnchants ("ALL_HELMETS"));	
-			if (isBoots (m))
-				results.putAll (getDisallowedEnchants ("ALL_BOOTS"));	
-			if (isChestplate (m))
-				results.putAll (getDisallowedEnchants ("ALL_CHESTPLATES"));	
-			if (isLeggings (m)) {
-				results.putAll (getDisallowedEnchants ("ALL_LEGGINGS"));	
-				results.putAll (getDisallowedEnchants ("ALL_PANTS"));	
+				results.putAll (getDisallowedEnchants (cs, "ALL_HELMETS"));	
+			else if (isBoots (m))
+				results.putAll (getDisallowedEnchants (cs, "ALL_BOOTS"));	
+			else if (isChestplate (m))
+				results.putAll (getDisallowedEnchants (cs, "ALL_CHESTPLATES"));	
+			else if (isLeggings (m)) {
+				results.putAll (getDisallowedEnchants (cs, "ALL_LEGGINGS"));	
+				results.putAll (getDisallowedEnchants (cs, "ALL_PANTS"));	
+			} else if (isBarding (m)) 
+				results.putAll (getDisallowedEnchants (cs, "ALL_BARDING"));					
+		}
+
+		results.putAll (getDisallowedEnchants (cs, matString));			
+
+		// Determine what groups to read. Overrides non-grouped disallows including specifics
+		HashSet<String> sectionGroups = Groups.get (cs.getCurrentPath());
+		if (sectionGroups != null) {
+			for (String groupName : sectionGroups.toArray(new String[0])) {
+				if (p == null || !p.hasPermission ("enchlimiter." + groupName)) {
+					log.fine ("No permission " + groupName + " loading section");
+					results.putAll (getDisallowedEnchants (cs.getConfigurationSection (groupName), m, p));	
+				}
 			}
 		}
 
-		if (getConfig().isConfigurationSection ("Disallowed enchants." + matString))
-			results.putAll (getDisallowedEnchants (matString));			
-
 		return results;
-	}   
+	}  	
 	
+	static private HashSet<String> Global_Groups = null;
+	static private HashSet<String> Table_Groups = null;
+	static private HashSet<String> Anvil_Groups = null;
+	static private HashMap <String,HashSet<String> > Groups = new HashMap<String,HashSet<String> >();
 	void checkConfig() {
-		if (getConfig().isConfigurationSection ("Disallowed enchants")) 
-		{
-			for (String itemString : getConfig().getConfigurationSection ("Disallowed enchants").getKeys (false /*depth*/)) {
-				Material m = Material.matchMaterial (itemString);
-				if (itemString.equals("ALL") || itemString.equals ("ALL_ARMOR") || (itemString.startsWith ("ALL_") && itemString.endsWith ("S"))) {
-					log.config ("Disallowed enchants." + itemString + ":" + getDisallowedEnchants (itemString));	
+		if (getConfig().isConfigurationSection ("Disallowed enchants")) {
+			Global_Groups = new HashSet<String>();	// old data lost and rely on Java garbage collector
+			Groups.put ("Disallowed enchants", Global_Groups);
+			checkConfig (getConfig().getConfigurationSection ("Disallowed enchants"));
+		}
+		if (getConfig().isConfigurationSection ("Disallowed anvil enchants")) {
+			Anvil_Groups = new HashSet<String>();
+			Groups.put ("Disallowed anvil enchants", Anvil_Groups);
+			checkConfig (getConfig().getConfigurationSection ("Disallowed anvil enchants"));
+		}
+		if (getConfig().isConfigurationSection ("Disallowed table enchants")) {
+			Table_Groups = new HashSet<String>();
+			Groups.put ("Disallowed table enchants", Table_Groups);
+			checkConfig (getConfig().getConfigurationSection ("Disallowed table enchants"));
+		}
+	}		
+	void checkConfig (ConfigurationSection cs) {
+		//log.info ("Checking section " + cs.getCurrentPath());
+		for (String itemString : cs.getKeys (false /*depth*/)) {
+			Material m = Material.matchMaterial (itemString);
+			if (itemString.equals("ALL") || itemString.equals ("ALL_ARMOR") || (itemString.startsWith ("ALL_") && itemString.endsWith ("S"))) {
+				log.config (cs.getCurrentPath() +"."+ itemString + ":" + getDisallowedEnchants (cs, itemString));	
+				continue;
+			} else if (m == null && itemString.startsWith ("Group_")) {
+				// remember for later searching
+				HashSet<String> sectionGroups = Groups.get (cs.getCurrentPath());
+				if (sectionGroups != null) {
+					if (sectionGroups.add (itemString) == false) {	// remember
+						log.warning (cs.getCurrentPath() + " contains duplicate " + itemString);							
+						continue;  // doesn't trigger bcs getSection takes the last one
+					}
+					else 
+						log.info ("Found " + cs.getCurrentPath() + "." + itemString);
+				} else {
+					log.warning ("Group_ names not allowed within " + cs.getCurrentPath());
 					continue;
 				}
-				
-				if (m == null)
-					log.warning ("Unknown item: " + itemString + ". Refer to http://bit.ly/EnchMat");
-				else if (m.isBlock())
-					log.warning ("Do not support blocks in 'Disallowed enchants': " + m);
-				else {
-					log.config ("Disallowed enchants." + itemString + ":" + getDisallowedEnchants (m));
-					// getDisallowedEnchants (m); 	// just for error checking
-				}
+				// recursive check of subgroup
+				checkConfig (cs.getConfigurationSection (itemString));
+				continue;
+			}
+			
+			if (m == null)
+				log.warning (cs.getCurrentPath() + ":Unknown item: " + itemString + ". Refer to http://bit.ly/EnchMat");
+			else if (m.isBlock())
+				log.warning (cs.getCurrentPath() + ":Do not support blocks in disallowed enchants: " + m);
+			else {
+				log.config (cs.getCurrentPath() +"." + itemString + ":" + getDisallowedEnchants (cs, m, null));
 			}
 		}
 	}		
@@ -980,6 +1095,8 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 	public void onEnable()
 	{
 		log = this.getLogger();
+		log.setLevel (java.util.logging.Level.CONFIG); // not working!
+
 		chatName = ChatColor.BLUE + this.getName() + ChatColor.RESET;
 		language = new LanguageWrapper(this, "eng"); // English locale
 		final String pluginPath = "plugins"+ getDataFolder().separator + getDataFolder().getName() + getDataFolder().separator;
@@ -989,14 +1106,16 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			getConfig().options().copyDefaults(true);
 			log.info ("No config found in " + pluginPath + "; writing defaults");
 			saveDefaultConfig();
-		} else {
-			// Parse config for errors
-			checkConfig();
-		}
-		addNewLanguages();		
+		} 
+		// Parse config for errors
+		checkConfig();
+		
+		//language.addNewLanguages();	// do after creating plugin direoctory		
+		addNewLanguages (this);
 			
 		getServer().getPluginManager().registerEvents ((Listener)this, this);
 		getCommand("el").setExecutor(new EnchLimiterCommandExecutor(this));
+		getCommand("elfix").setExecutor(new EnchLimiterFixCommand(this));
 
 		log.info (language.get (Bukkit.getConsoleSender(), "enabled", "EnchantLimiter in force; by Filbert66"));
 	}
@@ -1007,5 +1126,8 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		prevXP.clear();
 		prevAnvilData.clear();
 		lastMsg.clear();
+		if (Global_Groups != null) Global_Groups.clear();
+		if (Table_Groups != null) Table_Groups.clear();
+		if (Anvil_Groups != null) Anvil_Groups.clear();
 	}
 }

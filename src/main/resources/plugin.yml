@@ -2,10 +2,11 @@
 # 24 Apr 2014 : PSW :  Added .disallowed
 # 07 Jul 2014 : PSW :  Added commands
 # 13 Jul 2014 : PSW :  Added enchlimiter.repairs and 'el set' syntax
+# 30 Jul 2014 : PSW :  Added hold,elfix.
 
 name: EnchLimiter
 main: com.yahoo.phil_work.enchlimiter.EnchLimiter
-version: 1.3.2
+version: 1.4
 author: filbert66
 description: Limits enchants by multiples or configured list
 website: dev.bukkit.org/bukkit-plugins/enchlimiter
@@ -19,6 +20,7 @@ permissions:
       enchlimiter.multiple: true
       enchlimiter.disallowed: true
       enchlimiter.el: true
+      enchlimiter.elfix: true
   enchlimiter.books:
     description: Permits book + book enchants in anvil
     default: op
@@ -37,11 +39,19 @@ permissions:
   enchlimiter.repairs.nodowngrade:
     description: If 'Downgrade repairs' is true, it is ignored
     default: op
+  enchlimiter.elfix:
+    description: permits elfix command to remove disallowed enchants
+    default: true
     
 commands:
    el:
       description: This is the admin enchlimiter interface
       aliases: enchlimiter
-      usage: /<command> reload|save|set (multiples|pickup|punish|spawns|repairs|downgrade|infinite|(message [cancel|limit|disallowed]) [true|on|false|off])
+      usage: /<command> reload|save|set (multiples|pickup|punish|spawns|repairs|downgrade|infinite|hold|(message [cancel|limit|disallowed]) [true|on|false|off])
       permission: enchlimiter.el
-      permission-message: You don't have <permission>
+      permission-message: You don't have <permission> 
+   elfix:
+     description: Removes illegal enchants from held or provided item(s)
+     usage: /<command> [all|books]
+     permission: enchlimiter.elfix
+    
