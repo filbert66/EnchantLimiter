@@ -1,0 +1,37 @@
+1.5.3: New features, bug fixes
+* //Fixed//: Hotbar duplication bugs in Anvil [[/bukkit-plugins/ench-limiter/tickets/3-duplicate-item-in-anvil/|Ticket 3]].
+* //Added//: 
+** **Apply_on_global_check**: new config node that allows referring to Disallowed anvil and/or table lists during item spawn, player pickup, or player hold events, respectively controlled by **Fix spawned items**, **Stop pickup**, **Fix held items**
+*** three subsidiary items control these
+*** **Apply_on_global_check.anvil**: if true, then **Disallowed anvil enchants** will also be checked during those events. Default is //false//
+*** **Apply_on_global_check.table**: if true, then **Disallowed table enchants** will also be checked during those events. Default is //false//
+*** both of above can be true, if desired.
+*** **Apply_on_global_check.restrictive**: if true, the //highest// possible level will be used in case of conflict between **Disalllowed enhants** and the others. If false, the //lowest// enchant level will be used. Default is //true//.
+** New feature to control armor use during equippage
+*** if **Fix held items** is //true//, "fix" illegal armor as it is equipped normally.
+*** if false, equip event will be cancelled with **Message on cancel hold** to player
+*** also applies when user equips/receives armor from a dispenser (must be immediately in front of it)
+** Related new feature, if **Fix held items** is //false//, to cancel using an illegal item when held
+*** works for weapons, tools, and armor. Latter cancels right-click to equip armor
+*** new permission **enchlimiter.useillegal** if true, overrides this effect. 
+**** default is //Op// only.
+*** Note: there is a Bukkit bug that can lose the "hold event" sometimes, so the new default value is //true//; otherwise, user can spam the button until they are able to use the illegal item.
+** New **Downgrade in anvil**, if true, allows using illegal items in anvil by downgrading the result
+*** if detected when placing an item, warnings will be posted to user with new "Warn" messages
+*** if detected when taking result, action will be permitted but result will be downgraded 
+*** Default is //false//.
+*** If //false//, **Stop repairs** still applies.
+** New command options for **el set**
+*** Added new option to **set message**
+**** **message hold** //true// enables **Message on cancel hold**
+*** new **set global** options with three possibilities:
+**** set global **table** true|false will set **Apply_on_global_check.table**
+**** set global **anvil** true|false will set **Apply_on_global_check.anvil**
+**** set global **restrictive** true|false will set **Apply_on_global_check.restrictive**
+* //Changed//:
+** New default for **Fix held items** is //true//; see above Note.
+** Removed **Downgrade repairs** in favor of new **Downgrade in anvil**
+*** Command el set **downgrade on** now sets **Downgrade in anvil**. 
+
+
+

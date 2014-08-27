@@ -25,19 +25,15 @@
  *  20 Jul 2014 : Fixed book+book > disallowed level in anvil.
  *  27 Jul 2014 : Added PlayerHeldEvent fixer; added Anvil & Table disallowed lists;
  *                Added Groups within disallowed lists; added "ALL_BARDING"
+ *  06 Aug 2014 : Added blocking of armor equippage or fixing such when 'Fix held items' true, with BlockDispenseEvent.
+ *                Added Apply_on_global_check, 'Downgrade in anvil'. 
+ *                Fixed HOTBAR anvil duplication bugs.
  *
  * Bukkit BUG: Sometimes able to place items in Anvil & do restricted enchant; no ItemClickEvent!
+ * Bukkit BUG: Sometimes able to hold an item with no itemHeldEvent!
  * 
  * TODO: 
- *   replace Downgrade repairs with Downgrade in anvil which if true, downgrades to allowed enchants, if possible, vs. when false, always rejects a disallowed result.
- *   allow for different groups of disallowed and permitted enchants
  *   commands for modifying 'Disallowed enchants'
- * 
- *   Disallow equipping restricted item. But To block a player from wearing something is necessary to listen:
-		InventoryClick (put it on classic way)
-		PlayerInteract (righ click with it in hand)
-		BlockDispense (put with dispenser)
-	And of all of them with it's own problem (for dispensers is almost impossible to ensure a correct blocking).
  */
 
 package com.yahoo.phil_work.enchlimiter;
@@ -46,7 +42,7 @@ import com.yahoo.phil_work.LanguageWrapper;
 
 import java.io.File;
 import java.util.Collections;
-import java.util.List;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.logging.Logger;
 import java.util.HashMap;
@@ -57,6 +53,8 @@ import java.net.URLDecoder;
 import java.util.zip.*;
 
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
+import org.bukkit.block.Dispenser;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
@@ -67,9 +65,11 @@ import org.bukkit.inventory.meta.EnchantmentStorageMeta;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.enchantments.Enchantment;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.HumanEntity;
+import org.bukkit.event.block.BlockDispenseEvent;
 import org.bukkit.event.Listener;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.enchantment.EnchantItemEvent;
@@ -77,11 +77,15 @@ import org.bukkit.event.entity.ItemSpawnEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
+import org.bukkit.event.inventory.InventoryMoveItemEvent;
 import org.bukkit.event.inventory.PrepareItemCraftEvent;
 import org.bukkit.event.inventory.InventoryType.SlotType;
 import org.bukkit.event.player.PlayerPickupItemEvent;
 import org.bukkit.event.player.PlayerItemHeldEvent;
+import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.material.MaterialData;
+import org.bukkit.material.DirectionalContainer;
 import org.bukkit.plugin.*;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.plugin.PluginLogger;
@@ -210,6 +214,8 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			case PLACE_ONE:
 			case SWAP_WITH_CURSOR:
 			case MOVE_TO_OTHER_INVENTORY: // could be.. 
+			case HOTBAR_SWAP:
+			case HOTBAR_MOVE_AND_READD:
 				isPlace = true;
 				break;
 			case NOTHING:
@@ -226,6 +232,88 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		else if (human == null) {
 			log.warning ("Null player; cannot run");
 			return;
+		}
+		
+		// Check if equipping armor
+		if ((event.getSlotType() == SlotType.ARMOR && isPlace) ||
+		    (inv.getType() == InventoryType.CRAFTING && event.getAction() == InventoryAction.MOVE_TO_OTHER_INVENTORY && isArmor (event.getCurrentItem().getType())) )
+		{
+			// log.info ("Armor change " + action + " in slot " + event.getSlot() + " curr item " + event.getCurrentItem() + " with " + event.getCursor() + " on cursor");
+			// log.info ("Found in raw slot " + event.getRawSlot() + ": " + event.getView ().getItem(event.getRawSlot()));
+			PlayerInventory pinv = player.getInventory();
+			ItemStack item = null;
+			
+			// Get new armor item
+			switch (action) {
+				case PLACE_ALL:
+				case PLACE_SOME:
+				case PLACE_ONE:
+				case SWAP_WITH_CURSOR:
+					item = event.getCursor();
+					break;
+				case MOVE_TO_OTHER_INVENTORY: 
+					item = event.getCurrentItem();
+					Material m = item.getType();
+					if (isHelmet(m) && pinv.getHelmet() != null)
+						return;
+					if (isChestplate(m) && pinv.getChestplate() != null)
+						return;
+					if (isLeggings(m) && pinv.getLeggings() != null)
+						return;
+					if (isBoots(m) && pinv.getBoots() != null)
+						return;
+					// log.info ("Confirmed moving " + item.getType() + " to open armor slot");
+					break;
+				case HOTBAR_SWAP:
+				case HOTBAR_MOVE_AND_READD:	
+					item = pinv.getItem (event.getHotbarButton());
+					break;
+				default:
+					log.warning ("unprocessed armor move action: " + action);
+					break;
+			}
+			//log.info ("Found new armor: " + item);
+			
+			if (item != null)	{
+				// BUG on PLACE, HOT: duplicates fixed item in armor slot and on cursor, so try RunLater
+				final Player p = player;
+				final ItemStack fixMe = item;
+			
+				class armorFixer extends BukkitRunnable {
+					@Override
+					public void run() {
+						if ( !player.isOnline()) {
+							log.info (language.get (player, "loggedoff2", "{0} logged off before we could fix armor", player.getName()));
+							return;
+						}
+						PlayerInventory pInventory = p.getInventory();
+						boolean found = false;
+						
+						// Find item
+						ItemStack armor[] = pInventory.getArmorContents();
+						for (int j = 0; j < armor.length; j++) {
+							ItemStack i = armor[j];
+							if (i.isSimilar (fixMe)) { // apparently cursor is quantity 0 in this case
+								if (getConfig().getBoolean ("Fix held items")) {
+									fixItem (i, p);
+									found = true;
+								}
+							}
+						}
+						if (!found) 
+							log.warning ("Cannot find armor to fix: " + fixMe);
+					}
+				}
+				
+				if (getConfig().getBoolean ("Fix held items") && !player.hasPermission ("enchlimiter.useillegal"))
+					(new armorFixer()).runTask(this);		
+				else if (fixOrTestItem (item, player, /*test only=*/ true)) {
+					event.setCancelled (true);
+					if (getConfig().getBoolean ("Message on cancel"))
+						player.sendMessage (language.get (player, "cancelled", chatName + ": You don't have permission to do that"));
+				}
+			}
+			return; // armor equip
 		}
 		
 		/* Sometimes, Bukkit client places item in crafting without giving server event.
@@ -253,28 +341,6 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				} else
 					log.warning ("Cannot find anvil to repair");
 			}			
-
-			// Add null check for item naming
-			boolean isRepair = (slot0 != null && slot1 != null && slot0.getType() == slot1.getType() && slot0.getDurability() > 0 && !slot1.getItemMeta().hasEnchants());
-			if (isRepair) {
-				if (hasIllegalAnvilEnchant (slot0, player)) {
-					if ( !getConfig().getBoolean ("Stop repairs") || player.hasPermission ("enchlimiter.repairs")) {
-						if (getConfig().getBoolean ("Downgrade repairs") && !player.hasPermission ("enchlimiter.repairs.nodowngrade")) {
-							ItemStack testItem = result.clone();
-							if (fixAnvilItem (testItem, player) && !hasIllegalAnvilEnchant (testItem, player)) {
-								event.setCurrentItem (testItem); result = testItem; 
-								return;
-							}
-						} else {
-							log.info ("Allowing repair by " + player.getName() + " of " + slot0.getType());
-							return;
-						}
-					} 
-					// else it is still illegal and will be returned by block of code below
-				}
-				else 	// nothing to do
-					return;
-			}
 				
 			if (hasIllegalAnvilEnchant (result, player))
 			{
@@ -284,18 +350,31 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				final int playerXP = (ti != null? ti : player.getLevel());
 				final PlayerInventory pinv = player.getInventory();
 				final ItemStack crafted = result;
+				final boolean doDowngrade = getConfig ().getBoolean ("Downgrade in anvil");
+				// Add null check for item naming
+				final boolean isRepair = (slot0 != null && slot1 != null && slot0.getType() == slot1.getType() && slot0.getDurability() > 0 && !slot1.getItemMeta().hasEnchants());
 				
-				// Repair anvil before it is destroyed and can't return item in runLater task
-				Block anvilBlock = player.getTargetBlock(null, 6);
-				if (anvilBlock != null && anvilBlock.getType() == Material.ANVIL) {
-					Byte pData = prevAnvilData.get (player.getUniqueId());
-					if (pData != null) {
-						anvilBlock.setData (pData);
-						// log.info ("restored anvil data to " + pData);
+				if (!doDowngrade) { // going to stop the result taking and put ingredients back
+				
+					if (isRepair) { // check to see if we should allow it.
+						if ( !getConfig().getBoolean ("Stop repairs") || player.hasPermission ("enchlimiter.repairs")) {
+							log.info ("Allowing repair by " + player.getName() + " of " + slot0.getType());
+							return;
+						}				
+					}
+					
+					// Repair anvil before it is destroyed and can't return item in runLater task
+					Block anvilBlock = player.getTargetBlock(null, 6);
+					if (anvilBlock != null && anvilBlock.getType() == Material.ANVIL) {
+						Byte pData = prevAnvilData.get (player.getUniqueId());
+						if (pData != null) {
+							anvilBlock.setData (pData);
+							// log.info ("restored anvil data to " + pData);
+						} else
+							log.warning ("Don't have stored anvil repair state to restore");
 					} else
-						log.warning ("Don't have stored anvil repair state to restore");
-				} else
-					log.warning ("Cannot find anvil to repair");
+						log.warning ("Cannot find anvil to repair");
+				}
 				
 				class anvilUndoer extends BukkitRunnable {
 					@Override
@@ -312,23 +391,38 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 						InventoryView pInventory = player.getOpenInventory();
 
 						// Execute cancel
-						if (action == InventoryAction.MOVE_TO_OTHER_INVENTORY) {
-							// When shift-click, item is not on cursor but already in inventory/hotbar. 
+						if (action == InventoryAction.MOVE_TO_OTHER_INVENTORY || 
+							action == InventoryAction.HOTBAR_SWAP || 
+							action == InventoryAction.HOTBAR_MOVE_AND_READD) 
+						{
+							// When shift-click or number, item is not on cursor but already in inventory/hotbar. 
 							boolean found = false;
-							//log.info ("Looking in pinv for: " + crafted);
-							for (int i = 0; i < pinv.getSize(); i++) 
+							// log.info ("Looking in pinv for: " + crafted + " in inv[" + pinv.getSize() + "]");
+							for (int i = 0; i < pinv.getSize(); i++) {
 								// Use isSimilar because result is quantity zero (0)!
 								if (crafted.isSimilar (pinv.getItem (i))) {
-									pinv.clear (i);
-									// log.info ("Found and removed illegal item in raw slot " + i);		
+									if (!doDowngrade)
+										pinv.clear (i);
+									else { // downgrade it
+										ItemStack fixer = pinv.getItem(i);
+										fixAnvilItem (fixer, player);
+										pinv.setItem (i, fixer);										
+										return;  // don't return ingredients or restore levels
+									}
+									//log.info ("Found and removed illegal item in raw slot " + i);		
 									found = true;
 									break;
 								} else if (pinv.getItem(i) != null) {
 								//	log.info (i + ": inv " + pinv.getItem(i) + " is not result ");
 								}
-
+							}
 							if (!found)
 								log.warning ("could not find illegal result in inventory on shift-click by " + player.getName());								
+						} else if (doDowngrade) {
+							ItemStack fixer = pInventory.getCursor() ;
+							fixAnvilItem (fixer, player);
+							pInventory.setCursor (fixer);	
+							return;  // don't return ingredients or restore levels
 						} else
 							pInventory.setCursor (null); // take away illegal item in hand
 						
@@ -370,13 +464,6 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				
 				// log.info ("Placed a " + event.getCursor() + " in slot " + event.getRawSlot());
 				//log.info ("currentItem: " +  event.getCurrentItem());
-				/** 
-				 * Problem with MOVE_TO_OTHER_INVENTORY
-				 *  "InventoryClickEvent MOVE_TO_OTHER_INVENTORY in type ANVIL in  slot 8(raw 14)"
-				 * moves the item to next open anvil slot. 
-				 * Can I detect to which slot it moved?? Maybe if SlotType == CONTAINER
-				 *  if so, this branch doesn't even get called!
-				 */
 				if (event.getRawSlot() == 1) {
 					//log.info ("reset slot1 from " + slot1 + " to " + event.getCursor());
 					slot1 = event.getCursor();
@@ -419,17 +506,21 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			Map<Enchantment, Integer> disallowedEnchants = getDisallowedAnvilEnchants (tool.getType(), player);
 			boolean disallowed = false;
 			boolean bookPlusBook = (book.getType() == Material.ENCHANTED_BOOK && tool.getType() == Material.ENCHANTED_BOOK);
-									
+			ArrayList<Enchantment> violators = new ArrayList<Enchantment>();
+				
 			ItemMeta meta = book.getItemMeta();
 			if ( !(meta instanceof EnchantmentStorageMeta)) {
 				if (tool.getType() == book.getType() && tool.getDurability() == 0 && book.getDurability() == 0) {
 					// log.info ("Enchant combo attempt of " + tool.getType());
 					for (Enchantment e: book.getEnchantments().keySet()) {
 						if (disallowedEnchants.containsKey (e)) {
-							if (disallowedEnchants.get(e) <= book.getEnchantmentLevel(e) )
-								disallowed = true; // second item alone too high
-							else if (tool.getEnchantmentLevel (e) >= disallowedEnchants.get(e) - 1)
+							if (disallowedEnchants.get(e) <= book.getEnchantmentLevel(e) ) {
+							 	disallowed = true; // second item alone too high
+							 	violators.add (e);
+							} else if (tool.getEnchantmentLevel (e) >= disallowedEnchants.get(e) - 1) {
 								disallowed = true;	// trying to boost enchant of existing item at limit
+							 	violators.add (e);
+							}
 						}
 					}
 				}	
@@ -438,17 +529,24 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				for (Enchantment e: bookStore.getStoredEnchants().keySet()) {
 					//*DEBUG*/log.info ("testing for " + e + "-" + bookStore.getStoredEnchantLevel(e));
 					if (disallowedEnchants.containsKey (e)) {
-						if (disallowedEnchants.get(e) <= bookStore.getStoredEnchantLevel(e) )
+						if (disallowedEnchants.get(e) <= bookStore.getStoredEnchantLevel(e) ) {
 							disallowed = true; // book too high
+							violators.add (e);
+						}
 						else if (bookPlusBook) {
 							EnchantmentStorageMeta book1 = (EnchantmentStorageMeta)tool.getItemMeta();	
-							if (book1.getStoredEnchantLevel (e) >= disallowedEnchants.get(e) - 1)
+							if (book1.getStoredEnchantLevel (e) >= disallowedEnchants.get(e) - 1) {
 								disallowed = true;	// trying to boost one book with another
-						} else if (tool.getEnchantmentLevel (e) >= disallowedEnchants.get(e) - 1)
+							 	violators.add (e);
+							}
+						} else if (tool.getEnchantmentLevel (e) >= disallowedEnchants.get(e) - 1) {
 							disallowed = true;	// trying to boost enchant of existing item at limit
+							violators.add (e);
+						}
 					}
 				}
 			}
+			//*DEBUG*/log.info ("Found violations of " + violators);
 			if (event.getWhoClicked().hasPermission ("enchlimiter.disallowed"))
 				disallowed = false;
 		
@@ -508,8 +606,19 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 							log.info (language.get (Bukkit.getConsoleSender(), "attempted2", "{0} just tried to do a disallowed anvil enchant", player.getName()));
 					}
 				}
-				if (player != null)
-					(new BookReturner()).runTask(this);	
+				if (player != null) {
+					if (getConfig ().getBoolean ("Downgrade in anvil")) {
+						for (Enchantment e : violators) {
+							int level = disallowedEnchants.get (e);
+							if (level == 1)								
+								player.sendMessage (language.get (player, "removeWarn", chatName + ": {0} will be removed", e.getName()));
+							else 
+								player.sendMessage (language.get (player, "reduceWarn", chatName + ": {0} will be reduced to {1}", e.getName(), level));
+						}
+						player.sendMessage (language.get (player, "anvilWarn", chatName + ": Some enchants will be limited/removed; see above"));
+					} else					 
+						(new BookReturner()).runTask(this);	
+				}
 			}
 		}
 	}
@@ -552,8 +661,98 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		final Player p = event.getPlayer();
 		ItemStack item = p.getInventory().getItem (event.getNewSlot());
 
-		if (item != null && getConfig().getBoolean ("Fix held items"))		
+		if (item == null)
+			return;
+		else if (getConfig().getBoolean ("Fix held items"))		
 			fixItem (item, p);
+		else if (! p.hasPermission ("enchlimiter.useillegal"))
+		{ 
+			// stop hold
+			/* Bukkit BUG: sometimes don't get the hold event (ex. when player spams the hotbutton key). 
+			 *  Effect is that player can hold/use/shift-click an illegal item if they try hard enough.
+			 *  Recommend "Fix held items"= true, since item is fixed and multiple attempts don't matter.
+			 */
+		    if (fixOrTestItem (item, p, /*test only=*/ true)) {
+				event.setCancelled (true);
+				if (getConfig().getBoolean ("Message on cancel hold"))
+					p.sendMessage (language.get (p, "cancelledHold", chatName + ": You don't have permission to use that"));
+			}
+		}			
+	}
+	
+	/** Written to handle automatic equipping of armor by a player 1 block away from dispenser. but could
+	     be extended to include fixing all such acquired items. But that is not consistent with "Fix held items"
+	     context which allows player to acquire them, just not use them.
+	    On auto-equip of armor, supplied vector is zero.
+    **/
+	@EventHandler (ignoreCancelled = true)
+	void transferMonitor (BlockDispenseEvent event) {
+		ItemStack item = event.getItem();
+		if (!isArmor (item.getType()) || event.getVelocity().length() != 0D)
+			return; // nothing to do.
+		
+		Block b = event.getBlock();
+		Location loc = b.getLocation();
+		Player p = null;
+		
+		// Find nearby Player
+		if ( !(b.getType() == Material.DISPENSER || b.getType() == Material.DROPPER)) {
+			log.warning ("BlockDispenseEvent from a non-dispenser " + b);
+			return;
+		}
+		// Bukkit bug: DirectionalContainer does not support UP/DOWN
+		BlockFace facing = new DirectionalContainer (b.getType(), (byte)(b.getData() & 0x7)).getFacing();
+		if ((b.getData() & 0x7) == 0)
+			facing = BlockFace.DOWN;
+		else if ((b.getData() & 0x7) == 1)
+			facing = BlockFace.UP;
+		loc.add (facing.getModX(), facing.getModY(), facing.getModZ());
+		// log.info ("Checking " + facing + " (data " + b.getData() + ") location " + loc);
+		for (Entity e: loc.getChunk().getEntities()) {
+			if (loc.equals (e.getLocation().getBlock().getLocation())) { // within range
+				// log.info ("Found adjacent entity " + e.getType());
+				if (e instanceof Player) {
+					p = (Player)e;
+					break;
+				}
+			}
+		}
+		if (p != null) {
+			final Player player = p;
+			final ItemStack fixMe = item;
+			
+			class armorFixer extends BukkitRunnable {
+				@Override
+				public void run() {
+					if ( !player.isOnline()) {
+						log.info (language.get (player, "loggedoff2", "{0} logged off before we could fix armor", player.getName()));
+						return;
+					}
+					PlayerInventory pInventory = player.getInventory();
+
+					// Find item
+					ItemStack armor[] = pInventory.getArmorContents();
+					for (int j = 0; j < armor.length; j++) {
+						ItemStack i = armor[j];
+						if (i.equals (fixMe)) {
+							if (getConfig().getBoolean ("Fix held items"))
+								fixItem (i, player);
+							else if (! player.hasPermission ("enchlimiter.useillegal")) { //stop equipage
+								if ( !pInventory.addItem (i).isEmpty()) {
+									// unable to store item									
+									player.getWorld().dropItem (player.getLocation(), i);
+									log.info (player.getName() + " inventory full; dropping illegal dispensed " + i.getType());
+								}				
+								armor [j] = null;
+								pInventory.setArmorContents (armor);
+								// no need to message since user may not have been expecting it.
+							}	
+						}
+					}
+				}
+			}
+			(new armorFixer()).runTask(this);		
+		}
 	}
 	
 	// returns true if has enchants on global or anvil disallowed list or multiple when not allowed
@@ -596,6 +795,14 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		return false;
 	}	
 	
+	@SuppressWarnings("deprecation")
+	private void updateInventory (Player p) {
+		try {
+			if (Player.class.getMethod ("updateInventory") != null)
+				p.updateInventory();
+		} catch (NoSuchMethodException ex)  {}
+	}
+	
 	// returns true if item has enchants on disallowed list or multiple when not allowed
 	boolean fixItem (ItemStack item, Player p) {
 		return fixOrTestItem (item, p, false);
@@ -605,7 +812,45 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 	}
 	boolean fixOrTestItem (ItemStack item, Player p, boolean testOnly) {	
 		if (item == null) return false;
+		
 		Map<Enchantment, Integer> disallowedEnchants = getDisallowedEnchants (item.getType(), p);
+		if (getConfig().getBoolean ("Apply_on_global_check.anvil"))
+		{
+			Map<Enchantment, Integer> disallowedNewEnchants = getDisallowedAnvilEnchants (item.getType(), p);
+			
+			for (Enchantment e : disallowedNewEnchants.keySet())
+				if ( !disallowedEnchants.containsKey (e))
+					disallowedEnchants.put (e, disallowedNewEnchants.get(e));
+				else {
+					if (getConfig().getBoolean ("Apply_on_global_check.restrictive")) {
+						// apply highest level
+						if (disallowedNewEnchants.get (e) > disallowedEnchants.get (e))
+							disallowedEnchants.put (e, disallowedNewEnchants.get(e));
+					} else { // set lowest level
+						if (disallowedNewEnchants.get (e) < disallowedEnchants.get (e))
+							disallowedEnchants.put (e, disallowedNewEnchants.get(e));
+					}					
+				}
+		}
+		if (getConfig().getBoolean ("Apply_on_global_check.table"))
+		{
+			Map<Enchantment, Integer> disallowedNewEnchants = getDisallowedTableEnchants (item.getType(), p);
+			
+			for (Enchantment e : disallowedNewEnchants.keySet())
+				if ( !disallowedEnchants.containsKey (e))
+					disallowedEnchants.put (e, disallowedNewEnchants.get(e));
+				else {
+					if (getConfig().getBoolean ("Apply_on_global_check.restrictive")) {
+						// apply highest level
+						if (disallowedNewEnchants.get (e) > disallowedEnchants.get (e))
+							disallowedEnchants.put (e, disallowedNewEnchants.get(e));
+					} else { // set lowest level
+						if (disallowedNewEnchants.get (e) < disallowedEnchants.get (e))
+							disallowedEnchants.put (e, disallowedNewEnchants.get(e));
+					}					
+				}
+		}
+		
 		return fixOrTestItem (disallowedEnchants, item, p, testOnly);
 	}
 	boolean fixOrTestAnvilItem (ItemStack item, Player p, boolean testOnly) {	

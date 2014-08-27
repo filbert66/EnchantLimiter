@@ -73,6 +73,7 @@ public class EnchLimiterCommandExecutor implements CommandExecutor {
 				shortNameMap.put ("cancel", "Message on cancel");
 				shortNameMap.put ("limit", "Message on limit");
 				shortNameMap.put ("disallowed", "Message on disallowed");
+				shortNameMap.put ("hold", "Message on cancel hold");
 				if (nextArg + 1 > args.length) 
 					return false;
 				configName = shortNameMap.get (args [nextArg].toLowerCase());
@@ -81,6 +82,20 @@ public class EnchLimiterCommandExecutor implements CommandExecutor {
 					return false;
 				}
 				else nextArg++;
+			} else if (fieldName.equals ("global")) {
+				HashMap<String, String> shortNameMap = new HashMap<String,String>();
+				shortNameMap.put ("anvil", "Apply_on_global_check.anvil");
+				shortNameMap.put ("table", "Apply_on_global_check.table");
+				shortNameMap.put ("restrictive", "Apply_on_global_check.restrictive");
+			
+				if (nextArg + 1 > args.length) 
+					return false;
+				configName = shortNameMap.get (args [nextArg].toLowerCase());
+				if (configName == null) {
+					sendMsg (sender, "message '" + args [nextArg] + "': unknown command");
+					return false;
+				}
+				else nextArg++;		
 			} else {
 				HashMap<String, String> shortNameMap = new HashMap<String,String>();
 				shortNameMap.put ("multiples", "Limit Multiples");
@@ -90,7 +105,7 @@ public class EnchLimiterCommandExecutor implements CommandExecutor {
 				shortNameMap.put ("pickup", "Stop pickup");
 
 				shortNameMap.put ("hold", "Fix held items");				
-				shortNameMap.put ("downgrade", "Downgrade repairs");
+				shortNameMap.put ("downgrade", "Downgrade in anvil");
 				shortNameMap.put ("infinite", "Infinite anvils");
 				if ( !(fieldName.equals ("downgrade") || fieldName.equals ("infinite") || fieldName.equals ("hold")))
 					invert = true;	// syntax above 'set multiples true' means don't limit
