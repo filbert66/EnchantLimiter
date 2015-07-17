@@ -7,6 +7,7 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.plugin.Plugin;
 import java.io.File;
 import java.io.FileInputStream;
+import java.net.URL;
 import java.net.URLDecoder;
 import java.util.logging.Logger;
 import java.util.zip.*;
@@ -49,14 +50,19 @@ public class LanguageWrapper {
 		Logger log = plugin.getLogger();
 
 		try {  //iterate through added languages
-			String classURL = plugin.getClass().getResource(plugin.getName()+".class").toString();
+			URL classUrl = plugin.getClass().getResource(plugin.getClass().getSimpleName()+".class");
+			if (classUrl == null) {
+				log.warning ("Language loading failed: unable to find " + plugin.getClass().getSimpleName()+".class in " + plugin.getClass());
+				return;
+			}
+			String classURL = classUrl.toString();
 			String jarName = classURL.substring (classURL.lastIndexOf (':') + 1, classURL.indexOf ('!'));
 			ZipInputStream jar;
 			try {
 				File f = new File (jarName.replaceAll("%20", " ")); // toURI() supposed to catch this, but wasn't
 				jar = new ZipInputStream (new FileInputStream (f));
 			} catch (java.io.FileNotFoundException ex) {
-				log.warning ("Cannot find jar file: '" + jarName + "'");						
+				log.warning ("Language loading failed: Cannot find jar file: '" + jarName + "'");						
 				return;
 			}
 			if (jar != null) {
@@ -72,7 +78,7 @@ public class LanguageWrapper {
 				}
 			}
 			else 
-				log.warning ("Unable to open jar file: '" + jarName + "'");						
+				log.warning ("Language loading failed: Unable to open jar file: '" + jarName + "'");						
 		} catch (Exception ex) {
 			log.warning ("Unable to process language files: " + ex);		
 		}	

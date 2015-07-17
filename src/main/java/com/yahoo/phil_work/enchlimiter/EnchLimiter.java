@@ -17,7 +17,7 @@
  *  07 Jul 2014 : Added better check on anvil MOVE_TO_OTHER_INVENTORY;
  *              : Added commands, only reload for now.
  *  12 Jul 2014 : Moved commands to separate class; fixed bugs with books.
- *              : Added 'Downgrade repairs', and 'Allow repairs'.
+ *              : Added 'Downgrade repairs', and 'Stop repairs'.
  *  16 Jul 2014 : craftMonitor: Added nullcheck on player.
  *  18 Jul 2014 : Fixed Shift-click on result; space in dirname; repair anvil on cancelled enchant; fixed couple NPEs.
  *              : Allow either BOOK or ENCHANTED_BOOK config entries to be equivalent.
@@ -28,6 +28,8 @@
  *  06 Aug 2014 : Added blocking of armor equippage or fixing such when 'Fix held items' true, with BlockDispenseEvent.
  *                Added Apply_on_global_check, 'Downgrade in anvil'. 
  *                Fixed HOTBAR anvil duplication bugs.
+ *  23 Jun 2015 : Fixed bug parsing ALL_BARDING (no S).
+ *  15 Jul 2015 : Added "Stop all repairs" and perm "allrepairs"
  *
  * Bukkit BUG: Sometimes able to place items in Anvil & do restricted enchant; no ItemClickEvent!
  * Bukkit BUG: Sometimes able to hold an item with no itemHeldEvent!
@@ -39,6 +41,7 @@
 package com.yahoo.phil_work.enchlimiter;
 
 import com.yahoo.phil_work.LanguageWrapper;
+import com.yahoo.phil_work.MaterialCategory;
 
 import java.io.File;
 import java.util.Collections;
@@ -236,7 +239,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		
 		// Check if equipping armor
 		if ((event.getSlotType() == SlotType.ARMOR && isPlace) ||
-		    (inv.getType() == InventoryType.CRAFTING && event.getAction() == InventoryAction.MOVE_TO_OTHER_INVENTORY && isArmor (event.getCurrentItem().getType())) )
+		    (inv.getType() == InventoryType.CRAFTING && event.getAction() == InventoryAction.MOVE_TO_OTHER_INVENTORY && MaterialCategory.isArmor (event.getCurrentItem().getType())) )
 		{
 			// log.info ("Armor change " + action + " in slot " + event.getSlot() + " curr item " + event.getCurrentItem() + " with " + event.getCursor() + " on cursor");
 			// log.info ("Found in raw slot " + event.getRawSlot() + ": " + event.getView ().getItem(event.getRawSlot()));
@@ -254,13 +257,13 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				case MOVE_TO_OTHER_INVENTORY: 
 					item = event.getCurrentItem();
 					Material m = item.getType();
-					if (isHelmet(m) && pinv.getHelmet() != null)
+					if (MaterialCategory.isHelmet(m) && pinv.getHelmet() != null)
 						return;
-					if (isChestplate(m) && pinv.getChestplate() != null)
+					if (MaterialCategory.isChestplate(m) && pinv.getChestplate() != null)
 						return;
-					if (isLeggings(m) && pinv.getLeggings() != null)
+					if (MaterialCategory.isLeggings(m) && pinv.getLeggings() != null)
 						return;
-					if (isBoots(m) && pinv.getBoots() != null)
+					if (MaterialCategory.isBoots(m) && pinv.getBoots() != null)
 						return;
 					// log.info ("Confirmed moving " + item.getType() + " to open armor slot");
 					break;
@@ -341,8 +344,19 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				} else
 					log.warning ("Cannot find anvil to repair");
 			}			
-				
-			if (hasIllegalAnvilEnchant (result, player))
+
+			final boolean isRepair = (slot0 != null && slot1 != null && slot0.getType() == slot1.getType() && slot0.getDurability() > 0 && !slot1.getItemMeta().hasEnchants());				
+			boolean stopThisRepair = false;
+			if (isRepair && getConfig().getBoolean ("Stop all repairs")) {
+				if ( !player.hasPermission ("enchlimiter.allrepairs")) {
+					stopThisRepair = true;
+				} else {
+					log.info ("Allowing repair by " + player.getName());
+					return; // also allows if repair has illegal enchant.
+				}
+			}
+											
+			if (stopThisRepair || hasIllegalAnvilEnchant (result, player))
 			{
 				Integer ti = prevXP.get (player.getUniqueId());
 				if (ti == null)
@@ -350,13 +364,12 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				final int playerXP = (ti != null? ti : player.getLevel());
 				final PlayerInventory pinv = player.getInventory();
 				final ItemStack crafted = result;
-				final boolean doDowngrade = getConfig ().getBoolean ("Downgrade in anvil");
+				final boolean doDowngrade = stopThisRepair ? false : getConfig ().getBoolean ("Downgrade in anvil");
 				// Add null check for item naming
-				final boolean isRepair = (slot0 != null && slot1 != null && slot0.getType() == slot1.getType() && slot0.getDurability() > 0 && !slot1.getItemMeta().hasEnchants());
 				
 				if (!doDowngrade) { // going to stop the result taking and put ingredients back
 				
-					if (isRepair) { // check to see if we should allow it.
+					if (isRepair && !stopThisRepair) { // check to see if we should allow it.
 						if ( !getConfig().getBoolean ("Stop repairs") || player.hasPermission ("enchlimiter.repairs")) {
 							log.info ("Allowing repair by " + player.getName() + " of " + slot0.getType());
 							return;
@@ -688,7 +701,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 	@EventHandler (ignoreCancelled = true)
 	void transferMonitor (BlockDispenseEvent event) {
 		ItemStack item = event.getItem();
-		if (!isArmor (item.getType()) || event.getVelocity().length() != 0D)
+		if (!MaterialCategory.isArmor (item.getType()) || event.getVelocity().length() != 0D)
 			return; // nothing to do.
 		
 		Block b = event.getBlock();
@@ -989,131 +1002,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					
 		return modified;
 	}	
-	public static boolean isHelmet (Material type) {
-		switch (type) {
-			case LEATHER_HELMET:
-			case IRON_HELMET:
-			case GOLD_HELMET: 
-			case DIAMOND_HELMET:
-			case CHAINMAIL_HELMET:
-				return true;
-			default:
-				return false;
-		}
-	}
 
-	public static boolean isBoots (Material type) {
-		switch (type) {
-			case LEATHER_BOOTS:
-			case IRON_BOOTS:
-			case GOLD_BOOTS: 
-			case DIAMOND_BOOTS:
-			case CHAINMAIL_BOOTS:
-				return true;
-			default:
-				return false;
-		}
-	}
-	public static boolean isChestplate (Material type) {
-		switch (type) {
-			case LEATHER_CHESTPLATE:
-			case IRON_CHESTPLATE:
-			case GOLD_CHESTPLATE: 
-			case DIAMOND_CHESTPLATE:
-			case CHAINMAIL_CHESTPLATE:
-				return true;
-			default:
-				return false;
-		}
-	}
-	public static boolean isLeggings (Material type) {
-		switch (type) {
-			case LEATHER_LEGGINGS:
-			case IRON_LEGGINGS:
-			case GOLD_LEGGINGS: 
-			case DIAMOND_LEGGINGS:
-			case CHAINMAIL_LEGGINGS:
-				return true;
-			default:
-				return false;
-		}
-	}
-	public static boolean isArmor (Material type) {
-		return isHelmet(type) || isChestplate (type) || isLeggings(type) || isBoots (type) || isBarding(type);
-	}
-	public static boolean isBarding (Material type) {
-		switch (type) {
-			case IRON_BARDING:
-			case GOLD_BARDING: 
-			case DIAMOND_BARDING:
-				return true;
-			default:
-				return false;
-		}
-	}
-	public static boolean isSword (Material type) {
-		switch (type) {
-			case IRON_SWORD:
-			case STONE_SWORD:
-			case GOLD_SWORD: 
-			case DIAMOND_SWORD:
-			case WOOD_SWORD:
-				return true;
-			default:
-				return false;
-		}
-	}
-	
-	public static boolean isSpade (Material type) {
-		switch (type) {
-			case IRON_SPADE:
-			case STONE_SPADE:
-			case GOLD_SPADE: 
-			case DIAMOND_SPADE:
-			case WOOD_SPADE:
-				return true;
-			default: 
-				return false;
-		}
-	}
-	
-	public static boolean isHoe (Material type) {
-		switch (type) {	
-			case IRON_HOE:
-			case STONE_HOE:
-			case GOLD_HOE: 
-			case DIAMOND_HOE:
-			case WOOD_HOE:
-				return true;
-			default: 
-				return false;
-		}
-	}
-
-	public static boolean isPick (Material type) {
-		switch (type) {				
-			case IRON_PICKAXE:
-			case STONE_PICKAXE:
-			case GOLD_PICKAXE: 
-			case DIAMOND_PICKAXE:
-			case WOOD_PICKAXE:
-				return true;
-			default: 
-				return false;
-		}
-	}
-	public static boolean isAxe (Material type) {
-		switch (type) {				
-			case IRON_AXE:
-			case STONE_AXE:
-			case GOLD_AXE: 
-			case DIAMOND_AXE:
-			case WOOD_AXE:
-				return true;
-			default: 
-				return false;
-		}
-	}
 	public void addNewLanguages (Plugin plugin) {
 		final String Slash = plugin.getDataFolder().separator;
 		final String pluginPath = "plugins"+ Slash + getDataFolder().getName() + Slash;
@@ -1236,31 +1125,31 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		else if (m == Material.ENCHANTED_BOOK)
 			results.putAll (getDisallowedEnchants (cs, "BOOK"));
 			
-		else if (isSword (m))
+		else if (MaterialCategory.isSword (m))
 			results.putAll (getDisallowedEnchants (cs, "ALL_SWORDS"));
-		else if (isSpade (m)) {
+		else if (MaterialCategory.isSpade (m)) {
 			results.putAll (getDisallowedEnchants (cs, "ALL_SPADES"));
 			results.putAll (getDisallowedEnchants (cs, "ALL_SHOVELS"));			
-		} else if (isHoe (m))
+		} else if (MaterialCategory.isHoe (m))
 			results.putAll (getDisallowedEnchants (cs, "ALL_HOES"));
-		else if (isPick (m)) {
+		else if (MaterialCategory.isPick (m)) {
 			results.putAll (getDisallowedEnchants (cs, "ALL_PICKS"));
 			results.putAll (getDisallowedEnchants (cs, "ALL_PICKAXES"));
-		} else if (isAxe (m))
+		} else if (MaterialCategory.isAxe (m))
 			results.putAll (getDisallowedEnchants (cs, "ALL_AXES"));	
-		else if (isArmor (m)) {
+		else if (MaterialCategory.isArmor (m)) {
 			results.putAll (getDisallowedEnchants (cs, "ALL_ARMOR"));	
 			
-			if (isHelmet (m))
+			if (MaterialCategory.isHelmet (m))
 				results.putAll (getDisallowedEnchants (cs, "ALL_HELMETS"));	
-			else if (isBoots (m))
+			else if (MaterialCategory.isBoots (m))
 				results.putAll (getDisallowedEnchants (cs, "ALL_BOOTS"));	
-			else if (isChestplate (m))
+			else if (MaterialCategory.isChestplate (m))
 				results.putAll (getDisallowedEnchants (cs, "ALL_CHESTPLATES"));	
-			else if (isLeggings (m)) {
+			else if (MaterialCategory.isLeggings (m)) {
 				results.putAll (getDisallowedEnchants (cs, "ALL_LEGGINGS"));	
 				results.putAll (getDisallowedEnchants (cs, "ALL_PANTS"));	
-			} else if (isBarding (m)) 
+			} else if (MaterialCategory.isBarding (m)) 
 				results.putAll (getDisallowedEnchants (cs, "ALL_BARDING"));					
 		}
 
@@ -1305,7 +1194,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		//log.info ("Checking section " + cs.getCurrentPath());
 		for (String itemString : cs.getKeys (false /*depth*/)) {
 			Material m = Material.matchMaterial (itemString);
-			if (itemString.equals("ALL") || itemString.equals ("ALL_ARMOR") || (itemString.startsWith ("ALL_") && itemString.endsWith ("S"))) {
+			if (itemString.equals("ALL") || itemString.equals ("ALL_ARMOR") || itemString.equals ("ALL_BARDING") || (itemString.startsWith ("ALL_") && itemString.endsWith ("S"))) {
 				log.config (cs.getCurrentPath() +"."+ itemString + ":" + getDisallowedEnchants (cs, itemString));	
 				continue;
 			} else if (m == null && itemString.startsWith ("Group_")) {

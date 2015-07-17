@@ -7,7 +7,7 @@
 
 name: EnchLimiter
 main: com.yahoo.phil_work.enchlimiter.EnchLimiter
-version: 1.5.4
+version: 1.6
 author: filbert66
 description: Limits enchants by multiples or configured list
 website: dev.bukkit.org/bukkit-plugins/enchlimiter
@@ -43,6 +43,9 @@ permissions:
   enchlimiter.elfix:
     description: permits elfix command to remove disallowed enchants
     default: true
+  enchlimiter.allrepairs:
+    description: Permits repairs of any items, even when 'Stop all repairs' is true
+    default: op
     
 commands:
    el:
