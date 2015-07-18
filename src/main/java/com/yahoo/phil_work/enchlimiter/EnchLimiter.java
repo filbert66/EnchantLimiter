@@ -1117,7 +1117,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				enchant = Enchantment.getByName (enchantString);
 			}
 			if (enchant == null) 
-				log.warning (cs.getCurrentPath()+"." +matString + ": Unknown enchantment '" + enchantString+ "'. Refer to http://bit.ly/HxVS58");
+				log.warning (cs.getCurrentPath()+"." +matString + ": Unknown enchantment '" + enchantString+ "'. Refer to http://bit.ly/EnchLimit");
 			else
 				results.put (enchant, level);
 		}	
