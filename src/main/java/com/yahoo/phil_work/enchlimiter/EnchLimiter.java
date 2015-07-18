@@ -1098,17 +1098,28 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				log.warning (cs.getCurrentPath()+"."+matString + "." + enchantString + ": " + level + "<- Unsupported enchant level");
 				continue;
 			}
-			Enchantment enchant;
+			Enchantment enchant = null;
 			if (enchantString.equals ("ALL")) {
 				for (Enchantment e : Enchantment.values()) {
 					results.put (e, level);
 				}
 			}		
-			else if ((enchant = Enchantment.getByName (enchantString)) == null)
-				log.warning (cs.getCurrentPath()+"." +matString + ": Unknown enchantment '" + enchantString+ "'. Refer to http://bit.ly/HxVS58");
-			else {
-				results.put (enchant, level);
+			else if (enchantString.startsWith ("UNKNOWN_ENCHANT_")) {
+				try {
+					final int offset = new String ("UNKNOWN_ENCHANT_").length();
+					int enchID = Integer.parseInt (enchantString.substring (offset));
+					enchant = Enchantment.getById (enchID);
+				} catch (Exception ex) {
+					enchant = null;
+				}					
 			}
+			else {
+				enchant = Enchantment.getByName (enchantString);
+			}
+			if (enchant == null) 
+				log.warning (cs.getCurrentPath()+"." +matString + ": Unknown enchantment '" + enchantString+ "'. Refer to http://bit.ly/HxVS58");
+			else
+				results.put (enchant, level);
 		}	
 		return results;
 	}

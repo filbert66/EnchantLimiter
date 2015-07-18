@@ -7,11 +7,11 @@
 
 name: EnchLimiter
 main: com.yahoo.phil_work.enchlimiter.EnchLimiter
-version: 1.6.1
+version: 1.7
 author: filbert66
 description: Limits enchants by multiples or configured list
 website: dev.bukkit.org/bukkit-plugins/enchlimiter
-softdepend: [LanguagesAPI]
+softdepend: [LanguagesAPI, Unbreakable]
 # These plugins have not updated their MaterialCategory with getRawMaterial()
 loadbefore: [Thor, AntiFire, AntiCreeper]
 
