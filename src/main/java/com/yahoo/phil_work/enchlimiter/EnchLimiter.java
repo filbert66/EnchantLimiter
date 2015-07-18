@@ -187,7 +187,24 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			event.setCancelled (true);
 		}
 	}
-	
+
+	boolean isRepair (final ItemStack slot0, final ItemStack slot1) {
+		if (slot0 == null || slot1 == null)
+			return false;
+			
+		// Repair with same item type, first needs repair, second item with no enchants.		
+		if (slot0.getType() == slot1.getType() && slot0.getDurability() > 0 && !slot1.getItemMeta().hasEnchants())
+			return true;
+			
+		// Repair with raw elements in second slot
+		final Material raw = MaterialCategory.getRawMaterial (slot0.getType());
+		if (raw != null && raw == slot1.getType ())
+			return true;
+			
+		return false;
+	}
+		
+
 	// Is set with ClickEvent, when placing in crafting slot of an anvil.
 	private static Map <UUID, Integer> prevXP = new HashMap<UUID, Integer>();
 	private static Map <UUID, Byte> prevAnvilData = new HashMap<UUID, Byte>();
@@ -318,7 +335,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			}
 			return; // armor equip
 		}
-		
+
 		/* Sometimes, Bukkit client places item in crafting without giving server event.
 		 * Hence, add double-check to see if they just crafted an illegal item. If this works well, could remove 
 		 *  other code, but that is more disturbing to players since it appeared to work. 
@@ -330,6 +347,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			ItemStack[] anvilContents = inv.getContents();
 			final ItemStack slot0 = anvilContents[0];
 			final ItemStack slot1 = anvilContents[1];
+			final int slot1Amount = slot1.getAmount();
 			ItemStack result = event.getCurrentItem();
 
 			//log.info ("Crafted from 0: " + slot0);
@@ -345,7 +363,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					log.warning ("Cannot find anvil to repair");
 			}			
 
-			final boolean isRepair = (slot0 != null && slot1 != null && slot0.getType() == slot1.getType() && slot0.getDurability() > 0 && !slot1.getItemMeta().hasEnchants());				
+			final boolean isRepair = isRepair (slot0, slot1);
 			boolean stopThisRepair = false;
 			if (isRepair && getConfig().getBoolean ("Stop all repairs")) {
 				if ( !player.hasPermission ("enchlimiter.allrepairs")) {
@@ -369,7 +387,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				
 				if (!doDowngrade) { // going to stop the result taking and put ingredients back
 				
-					if (isRepair && !stopThisRepair) { // check to see if we should allow it.
+					if (isRepair && !stopThisRepair && hasIllegalAnvilEnchant (result, player)) { // check to see if we should allow it.
 						if ( !getConfig().getBoolean ("Stop repairs") || player.hasPermission ("enchlimiter.repairs")) {
 							log.info ("Allowing repair by " + player.getName() + " of " + slot0.getType());
 							return;
@@ -440,7 +458,10 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 							pInventory.setCursor (null); // take away illegal item in hand
 						
 						aInventory.setItem(0, slot0); // return craft ingredient 1
+						slot1.setAmount (slot1Amount); // when repairing with raw materials, sometimes the amount changed
 						aInventory.setItem(1, slot1); // return craft ingredient 2
+						log.fine ("returned slot1: " + slot1);
+						
 						if (getConfig().getBoolean ("Restore levels"))
 							player.setLevel (playerXP);
 												
