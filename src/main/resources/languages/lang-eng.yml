@@ -1,5 +1,5 @@
 enabled: EnchantLimiter in force; by Filbert66
-limited2: §9EnchLimiter§r removed multiple {0}-{1} & returned {2} XP
+limited3: §9EnchLimiter§r removed multiple {0}-{1}
 cancelled: §9EnchLimiter§r: You don't have permission to do that
 cancelledHold: §9EnchLimiter§r: You don't have permission to hold that
 attempted: {0} just tried to do a book+book enchant

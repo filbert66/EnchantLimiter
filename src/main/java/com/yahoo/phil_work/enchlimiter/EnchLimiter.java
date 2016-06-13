@@ -30,6 +30,7 @@
  *                Fixed HOTBAR anvil duplication bugs.
  *  23 Jun 2015 : Fixed bug parsing ALL_BARDING (no S).
  *  15 Jul 2015 : Added "Stop all repairs" and perm "allrepairs"
+ *  11 Jun 2016 : Spigot/Bukkit 1.10 compatibility; fixed NPE on armor equip & allow for shields; 
  *
  * Bukkit BUG: Sometimes able to place items in Anvil & do restricted enchant; no ItemClickEvent!
  * Bukkit BUG: Sometimes able to hold an item with no itemHeldEvent!
@@ -116,9 +117,12 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		}	
 	}
 
+	// Now in 1.8, Levels used is a fixed 1-3, so don't return any if just limitMultiples since they still get at least one.
+	//  If disallowed enchants reduces a L3 1/3rd, should charge only two, but Bukkit doesn't give a way to do that with 
+	//    the event, so have to manually reset the level on returning.
 	@EventHandler (ignoreCancelled = true)
 	void enchantMonitor (EnchantItemEvent event) {
-		Player player = event.getEnchanter();
+		final Player player = event.getEnchanter();
 		boolean limitMultiples = getConfig().getBoolean ("Limit Multiples", true) && 
 			! player.hasPermission ("enchlimiter.multiple");
 		
@@ -127,7 +131,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		
 		// Get List of disallowed enchants for that item and for ALL items
 		Map<Enchantment, Integer> disallowedEnchants = getDisallowedTableEnchants (item.getType(), player);
-		log.config ("disallowed on " + item.getType() + disallowedEnchants);
+		log.config ("disallowed on " + item.getType() +":" + disallowedEnchants);
 		
 		if ( !limitMultiples && disallowedEnchants.isEmpty())
 			return;  // nothing to do; leave event alive for another plugin
@@ -138,9 +142,12 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		int totalLevels =0;
 		for (Enchantment e : toAdd.keySet()) 
 			totalLevels += toAdd.get(e);
-		float XPperLevel = event.getExpLevelCost(); XPperLevel /= totalLevels;
-		//log.info ("Total enchants: " + toAdd.size() + ". Total levels: " + totalLevels + ". XP/lvl = " + XPperLevel);
+		final int initialCost = event.getExpLevelCost();		
+		float XPperLevel = initialCost; XPperLevel /= totalLevels;
+		//*DEBUG*/log.info ("Total enchants: " + toAdd.size() + ". Total levels: " + totalLevels + ". XP/lvl = " + XPperLevel);
 			
+		int returningLevels = 0;
+
 		for (Enchantment ench : toAdd.keySet()) {
 			int level = toAdd.get(ench);
 			int returnedXP = (int)(0.5F + (XPperLevel * level));
@@ -149,9 +156,11 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				if (disallowedEnchants.containsKey (ench) && level >= disallowedEnchants.get (ench) &&
 					! player.hasPermission ("enchlimiter.disallowed") ) 
 				{
-					event.setExpLevelCost (event.getExpLevelCost() - returnedXP);
+					if (getConfig().getBoolean ("Restore levels"))
+						event.setExpLevelCost (event.getExpLevelCost() - returnedXP);
 					event.getEnchantsToAdd().remove (ench);
-					
+					//*DEBUG*/log.info ("removed " + ench + "-" + level + ", now at " + event.getEnchantsToAdd().get(ench));
+								
 					// try to set lower enchant level, if permitted
 					if (disallowedEnchants.get (ench) > 1) {
 						int newLevel = disallowedEnchants.get (ench) - 1;
@@ -160,31 +169,90 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 						event.getEnchantsToAdd().put (ench, newLevel);
 						int addedXP = (int)(0.5F + (XPperLevel * newLevel));
 						event.setExpLevelCost (event.getExpLevelCost() + addedXP);
+						//*DEBUG*/log.info ("Added " + ench + "-" + newLevel + " to " +item.getType() + ", now at " + event.getEnchantsToAdd().get(ench));					
+						// Bukkit BUG: even though it properly reports null, then desired level, still (1/10 times) give user original level. 
+						//   Need to track down if still exists in 1.8
 						returnedXP -= addedXP;
 						enchants++;
 					}
-					
+
 					if (getConfig().getBoolean ("Message on disallowed", true))
-						player.sendMessage (language.get (player, "disallowed2", 
-											chatName + " removed disallowed {0}-{1} &returned {2} XP", ench.getName(), level, returnedXP ));
+						player.sendMessage (language.get (player, "disallowed3", 
+											chatName + " removed disallowed {0}-{1} from {2}", ench.getName(), level, item.getType() ));
 				}
 				else {
 					enchants++;
 					//*DEBUG*/log.info ("Added " + ench + "-" + level + " to " +item.getType());
 				}
 			} else {
-				event.setExpLevelCost (event.getExpLevelCost() - returnedXP);
+				if (!limitMultiples && getConfig().getBoolean ("Restore levels"))
+					event.setExpLevelCost (event.getExpLevelCost() - returnedXP);
 				event.getEnchantsToAdd().remove (ench);
+				item.removeEnchantment (ench); // just to be sure!
+				//* DEBUG */log.info ("Removed " + ench.getName() + "-" + level + ", now: " + event.getEnchantsToAdd());
 
 				if (getConfig().getBoolean ("Message on limit", true))
-					player.sendMessage (language.get (player, "limited2", 
-										chatName + " removed multiple {0}-{1} & returned {2} XP", ench.getName(), level, returnedXP ));
+					player.sendMessage (language.get (player, "limited3", 
+										chatName + " removed multiple {0}-{1}", ench.getName(), level));
 			}
 		} 
 
 		if (enchants == 0)  {
 			//log.info ("Removed all enchants attempted on " + item.getType());
 			event.setCancelled (true);
+		}
+		else {
+			final ItemStack limitedItem = item.clone();
+			//*DEBUG*/ log.info ("Before adding, the item has: " + item.getEnchantments());
+			limitedItem.addEnchantments (event.getEnchantsToAdd());  // supposed to be reduced by above
+	
+			switch (event.whichButton()) // Now directly corresponds to charged levels.
+			{
+				case 0: returningLevels = 0; break;
+				case 1: 
+					if ((float) event.getExpLevelCost() / initialCost  <= 1.0F/2.0F)
+						returningLevels = 1; 
+					break;
+				case 2:
+					
+					if ((float) event.getExpLevelCost() / initialCost  <= 1.0F/3.0F)
+						returningLevels = 2; 
+					else if ((float) event.getExpLevelCost() / initialCost  <= 2.0F/3.0F)
+						returningLevels = 1; 
+					break;
+			}
+			if ( !getConfig().getBoolean ("Restore levels"))
+				returningLevels = 0;
+			final int returnedLevels = returningLevels;
+					
+			class enchantGiveback extends BukkitRunnable 
+			{
+				@Override
+				public void run() {
+					if ( !player.isOnline()) {
+						log.info (language.get (player, "loggedoff", "{0} logged off before we could cancel anvil enchant", player.getName()));
+						return;
+					}
+					InventoryView pInventory = player.getOpenInventory();
+					if (player.getOpenInventory().getTopInventory().getType() != InventoryType.ENCHANTING) {
+						log.warning (language.get (player, "theft", "{0} closed inventory or table died and got an illegal item: {1}", player.getName(), limitedItem.getType()));
+						return;
+					}
+					EnchantingInventory iInventory = (EnchantingInventory)player.getOpenInventory().getTopInventory();
+
+					// Execute limit
+					iInventory.setItem (limitedItem); // give properly enchanted item back.
+					//* DEBUG */ log.info ("Replaced full result with " + limitedItem);		
+					
+					if (getConfig().getBoolean ("Restore levels") && returnedLevels > 0) {
+						player.giveExpLevels (returnedLevels);							
+						player.sendMessage (language.get (player, "restored", chatName + " restored {0} XP", returnedLevels));
+					}
+				}
+			}
+			if (player != null)
+				(new enchantGiveback()).runTaskLater(this,1);		
+		
 		}
 	}
 
@@ -255,8 +323,13 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		}
 		
 		// Check if equipping armor
+		final int SHIELD_CLICK_SLOT = 45;
+		final int SHIELD_SLOT = 40;
 		if ((event.getSlotType() == SlotType.ARMOR && isPlace) ||
-		    (inv.getType() == InventoryType.CRAFTING && event.getAction() == InventoryAction.MOVE_TO_OTHER_INVENTORY && MaterialCategory.isArmor (event.getCurrentItem().getType())) )
+		 	(inv.getType() == InventoryType.CRAFTING && isPlace && event.getRawSlot() == SHIELD_CLICK_SLOT ) || 
+		    (inv.getType() == InventoryType.CRAFTING && event.getAction() == InventoryAction.MOVE_TO_OTHER_INVENTORY && 
+		     (MaterialCategory.isArmor (event.getCurrentItem().getType()) || event.getCurrentItem().getType() == Material.SHIELD)
+		    ))
 		{
 			// log.info ("Armor change " + action + " in slot " + event.getSlot() + " curr item " + event.getCurrentItem() + " with " + event.getCursor() + " on cursor");
 			// log.info ("Found in raw slot " + event.getRawSlot() + ": " + event.getView ().getItem(event.getRawSlot()));
@@ -281,6 +354,8 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					if (MaterialCategory.isLeggings(m) && pinv.getLeggings() != null)
 						return;
 					if (MaterialCategory.isBoots(m) && pinv.getBoots() != null)
+						return;
+					if (m == Material.SHIELD && pinv.getItem (SHIELD_SLOT) != null)
 						return;
 					// log.info ("Confirmed moving " + item.getType() + " to open armor slot");
 					break;
@@ -312,21 +387,30 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 						// Find item
 						ItemStack armor[] = pInventory.getArmorContents();
 						for (int j = 0; j < armor.length; j++) {
-							ItemStack i = armor[j];
-							if (i.isSimilar (fixMe)) { // apparently cursor is quantity 0 in this case
+							ItemStack i = armor[j]; 
+							if (i != null && i.isSimilar (fixMe)) { // apparently cursor is quantity 0 in this case
 								if (getConfig().getBoolean ("Fix held items")) {
 									fixItem (i, p);
+									armor [j] = i;
 									found = true;
 								}
 							}
 						}
-						if (!found) 
-							log.warning ("Cannot find armor to fix: " + fixMe);
+						if (found) 
+							pInventory.setArmorContents (armor);				
+						else  { // might be shield
+							ItemStack shield = pInventory.getItem (SHIELD_SLOT); 
+							if (shield != null && shield.isSimilar (fixMe)) {
+								fixItem (shield, p);
+								pInventory.setItem (SHIELD_SLOT, shield);
+							} else	
+								log.warning ("Cannot find armor to fix: " + fixMe);
+						}  
 					}
-				}
+				} // end armorFixer class
 				
 				if (getConfig().getBoolean ("Fix held items") && !player.hasPermission ("enchlimiter.useillegal"))
-					(new armorFixer()).runTask(this);		
+					(new armorFixer()).runTaskLater(this,1);		
 				else if (fixOrTestItem (item, player, /*test only=*/ true)) {
 					event.setCancelled (true);
 					if (getConfig().getBoolean ("Message on cancel"))
@@ -355,9 +439,9 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 
 			// New feature: infinite anvil
 			if (getConfig().getBoolean ("Infinite anvils")) {
-				Block anvilBlock = player.getTargetBlock(null, 6);
+				Block anvilBlock = player.getTargetBlock((HashSet<Byte>)null, 6);
 				if (anvilBlock != null && anvilBlock.getType() == Material.ANVIL) {	
-					log.info ("Current anvil data: " + anvilBlock.getData());			
+					//log.info ("Current anvil data: " + anvilBlock.getData());			
 					anvilBlock.setData ((byte)(anvilBlock.getData () & 0x03));  // 0=undamaged; bits 0-1 are compass orientation on Block
 				} else
 					log.warning ("Cannot find anvil to repair");
@@ -395,7 +479,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					}
 					
 					// Repair anvil before it is destroyed and can't return item in runLater task
-					Block anvilBlock = player.getTargetBlock(null, 6);
+					Block anvilBlock = player.getTargetBlock((HashSet<Byte>)null, 6);
 					if (anvilBlock != null && anvilBlock.getType() == Material.ANVIL) {
 						Byte pData = prevAnvilData.get (player.getUniqueId());
 						if (pData != null) {
@@ -491,7 +575,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				// Remember for later, in case we need it. 
 				Integer curXP = player.getLevel();	// need to get/set levels, not XP (progress to next)
 				prevXP.put (player.getUniqueId(), curXP);
-				Block anvil = player.getTargetBlock (null,6);
+				Block anvil = player.getTargetBlock ((HashSet<Byte>)null,6);
 				if (anvil != null && anvil.getType() == Material.ANVIL)
 					prevAnvilData.put (player.getUniqueId(), anvil.getData());
 				//*DEBUG*/ log.info ("saved XP at " + curXP);
@@ -768,7 +852,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					ItemStack armor[] = pInventory.getArmorContents();
 					for (int j = 0; j < armor.length; j++) {
 						ItemStack i = armor[j];
-						if (i.equals (fixMe)) {
+						if (i != null && i.equals (fixMe)) {
 							if (getConfig().getBoolean ("Fix held items"))
 								fixItem (i, player);
 							else if (! player.hasPermission ("enchlimiter.useillegal")) { //stop equipage
