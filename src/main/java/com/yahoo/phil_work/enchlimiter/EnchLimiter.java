@@ -766,7 +766,10 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		Player player = event.getPlayer();
 		ItemStack item = event.getItem().getItemStack();
 
-		if (fixOrTestItem (item, player, getConfig().getBoolean ("Stop pickup"))) {
+		if ( !getConfig().getBoolean ("Stop pickup") && player.hasPermission ("enchlimiter.useillegal"))
+			return;
+			
+		if (fixOrTestItem (item, player, /* testOnly=*/ getConfig().getBoolean ("Stop pickup"))) {
 			if (getConfig().getBoolean ("Stop pickup")) {
 				event.setCancelled (true);
 				
