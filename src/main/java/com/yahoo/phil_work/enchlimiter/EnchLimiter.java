@@ -31,6 +31,7 @@
  *  23 Jun 2015 : Fixed bug parsing ALL_BARDING (no S).
  *  15 Jul 2015 : Added "Stop all repairs" and perm "allrepairs"
  *  11 Jun 2016 : Spigot/Bukkit 1.10 compatibility; fixed NPE on armor equip & allow for shields; 
+ *  24 Jun 2016 : Conditional use of Shields for 1.8 backward compatibility.
  *
  * Bukkit BUG: Sometimes able to place items in Anvil & do restricted enchant; no ItemClickEvent!
  * Bukkit BUG: Sometimes able to hold an item with no itemHeldEvent!
@@ -102,6 +103,14 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 	public Logger log;
 	public LanguageWrapper language;
     public String chatName;
+    
+	static private boolean SUPPORT_SHIELD;
+	static { try { 	
+			SUPPORT_SHIELD = (Material.valueOf ("SHIELD") != null);
+		} catch (Exception ex) {
+			SUPPORT_SHIELD = false;
+		}
+	}
 
 	boolean hasAndDeductXP (final Player player, int levels) {
 		if (player.getGameMode() == org.bukkit.GameMode.CREATIVE)
@@ -328,7 +337,8 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		if ((event.getSlotType() == SlotType.ARMOR && isPlace) ||
 		 	(inv.getType() == InventoryType.CRAFTING && isPlace && event.getRawSlot() == SHIELD_CLICK_SLOT ) || 
 		    (inv.getType() == InventoryType.CRAFTING && event.getAction() == InventoryAction.MOVE_TO_OTHER_INVENTORY && 
-		     (MaterialCategory.isArmor (event.getCurrentItem().getType()) || event.getCurrentItem().getType() == Material.SHIELD)
+		     (MaterialCategory.isArmor (event.getCurrentItem().getType()) || 
+		     	(SUPPORT_SHIELD && event.getCurrentItem().getType() == Material.SHIELD) )
 		    ))
 		{
 			// log.info ("Armor change " + action + " in slot " + event.getSlot() + " curr item " + event.getCurrentItem() + " with " + event.getCursor() + " on cursor");
@@ -355,7 +365,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 						return;
 					if (MaterialCategory.isBoots(m) && pinv.getBoots() != null)
 						return;
-					if (m == Material.SHIELD && pinv.getItem (SHIELD_SLOT) != null)
+					if (SUPPORT_SHIELD && m == Material.SHIELD && pinv.getItem (SHIELD_SLOT) != null)
 						return;
 					// log.info ("Confirmed moving " + item.getType() + " to open armor slot");
 					break;
@@ -398,7 +408,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 						}
 						if (found) 
 							pInventory.setArmorContents (armor);				
-						else  { // might be shield
+						else if (SUPPORT_SHIELD) {  // might be shield
 							ItemStack shield = pInventory.getItem (SHIELD_SLOT); 
 							if (shield != null && shield.isSimilar (fixMe)) {
 								fixItem (shield, p);
