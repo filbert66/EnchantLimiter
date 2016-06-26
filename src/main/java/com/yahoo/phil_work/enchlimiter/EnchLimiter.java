@@ -32,6 +32,7 @@
  *  15 Jul 2015 : Added "Stop all repairs" and perm "allrepairs"
  *  11 Jun 2016 : Spigot/Bukkit 1.10 compatibility; fixed NPE on armor equip & allow for shields; 
  *  24 Jun 2016 : Conditional use of Shields for 1.8 backward compatibility.
+ *  25 Jun 2016 : Don't cancel enchant event if nothing left so that illegal enchant clears. 
  *
  * Bukkit BUG: Sometimes able to place items in Anvil & do restricted enchant; no ItemClickEvent!
  * Bukkit BUG: Sometimes able to hold an item with no itemHeldEvent!
@@ -77,6 +78,7 @@ import org.bukkit.entity.HumanEntity;
 import org.bukkit.event.block.BlockDispenseEvent;
 import org.bukkit.event.Listener;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.enchantment.EnchantItemEvent;
 import org.bukkit.event.entity.ItemSpawnEvent;
 import org.bukkit.event.inventory.InventoryType;
@@ -129,7 +131,8 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 	// Now in 1.8, Levels used is a fixed 1-3, so don't return any if just limitMultiples since they still get at least one.
 	//  If disallowed enchants reduces a L3 1/3rd, should charge only two, but Bukkit doesn't give a way to do that with 
 	//    the event, so have to manually reset the level on returning.
-	@EventHandler (ignoreCancelled = true)
+	// Priority = HIGH so that this gets called _after_ Unbreakable so that the clone we return has the Unbreakable tag set. 
+	@EventHandler (ignoreCancelled = true, priority = EventPriority.HIGH )
 	void enchantMonitor (EnchantItemEvent event) {
 		final Player player = event.getEnchanter();
 		boolean limitMultiples = getConfig().getBoolean ("Limit Multiples", true) && 
@@ -140,25 +143,25 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		
 		// Get List of disallowed enchants for that item and for ALL items
 		Map<Enchantment, Integer> disallowedEnchants = getDisallowedTableEnchants (item.getType(), player);
-		log.config ("disallowed on " + item.getType() +":" + disallowedEnchants);
+		// log.config ("disallowed on " + item.getType() +":" + disallowedEnchants);
 		
 		if ( !limitMultiples && disallowedEnchants.isEmpty())
 			return;  // nothing to do; leave event alive for another plugin
 				
 		Map<Enchantment,Integer> toAdd = new HashMap<Enchantment, Integer>();
-		toAdd.putAll (event.getEnchantsToAdd()); // to avoid modifying while iterating
+		// toAdd.putAll (event.getEnchantsToAdd()); // to avoid modifying while iterating
 
 		int totalLevels =0;
-		for (Enchantment e : toAdd.keySet()) 
-			totalLevels += toAdd.get(e);
+		for (Enchantment e : event.getEnchantsToAdd().keySet()) 
+			totalLevels += event.getEnchantsToAdd().get(e);
 		final int initialCost = event.getExpLevelCost();		
 		float XPperLevel = initialCost; XPperLevel /= totalLevels;
 		//*DEBUG*/log.info ("Total enchants: " + toAdd.size() + ". Total levels: " + totalLevels + ". XP/lvl = " + XPperLevel);
 			
 		int returningLevels = 0;
 
-		for (Enchantment ench : toAdd.keySet()) {
-			int level = toAdd.get(ench);
+		for (Enchantment ench : event.getEnchantsToAdd().keySet()) {
+			int level = event.getEnchantsToAdd().get(ench);
 			int returnedXP = (int)(0.5F + (XPperLevel * level));
 
 			if ( !limitMultiples || enchants == 0) {
@@ -167,7 +170,8 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				{
 					if (getConfig().getBoolean ("Restore levels"))
 						event.setExpLevelCost (event.getExpLevelCost() - returnedXP);
-					event.getEnchantsToAdd().remove (ench);
+					// event.getEnchantsToAdd().remove (ench);
+					item.removeEnchantment (ench); // just to be sure!
 					//*DEBUG*/log.info ("removed " + ench + "-" + level + ", now at " + event.getEnchantsToAdd().get(ench));
 								
 					// try to set lower enchant level, if permitted
@@ -175,7 +179,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 						int newLevel = disallowedEnchants.get (ench) - 1;
 						// avoid adding directly to item so we can avoid book details
 						//   also allows another handler to cancel
-						event.getEnchantsToAdd().put (ench, newLevel);
+						toAdd.put (ench, newLevel);
 						int addedXP = (int)(0.5F + (XPperLevel * newLevel));
 						event.setExpLevelCost (event.getExpLevelCost() + addedXP);
 						//*DEBUG*/log.info ("Added " + ench + "-" + newLevel + " to " +item.getType() + ", now at " + event.getEnchantsToAdd().get(ench));					
@@ -191,12 +195,13 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				}
 				else {
 					enchants++;
-					//*DEBUG*/log.info ("Added " + ench + "-" + level + " to " +item.getType());
+					toAdd.put (ench, level);
+					//*DEBUG*/log.info ("Adding " + ench + "-" + level + " to " +item.getType());
 				}
 			} else {
 				if (!limitMultiples && getConfig().getBoolean ("Restore levels"))
 					event.setExpLevelCost (event.getExpLevelCost() - returnedXP);
-				event.getEnchantsToAdd().remove (ench);
+				//event.getEnchantsToAdd().remove (ench);
 				item.removeEnchantment (ench); // just to be sure!
 				//* DEBUG */log.info ("Removed " + ench.getName() + "-" + level + ", now: " + event.getEnchantsToAdd());
 
@@ -207,13 +212,25 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		} 
 
 		if (enchants == 0)  {
-			//log.info ("Removed all enchants attempted on " + item.getType());
-			event.setCancelled (true);
+			// log.info ("Removed all added enchants attempted on " + item.getType());
+			// Don't cancel so that illegal enchants clears from enchant table and doesn't stay stuck.
+			// event.setExpLevelCost (0);
+			// event.getEnchantsToAdd().clear();
 		}
-		else {
+		if (true) {
 			final ItemStack limitedItem = item.clone();
 			//*DEBUG*/ log.info ("Before adding, the item has: " + item.getEnchantments());
-			limitedItem.addEnchantments (event.getEnchantsToAdd());  // supposed to be reduced by above
+			if ( !toAdd.isEmpty()) {
+				if (limitedItem.getType() == Material.BOOK || limitedItem.getType() == Material.ENCHANTED_BOOK) {
+					limitedItem.setType(Material.ENCHANTED_BOOK);
+					EnchantmentStorageMeta bookMeta = (EnchantmentStorageMeta)limitedItem.getItemMeta();
+					for (Enchantment e : toAdd.keySet())
+						bookMeta.addStoredEnchant (e, toAdd.get(e), true);
+					limitedItem.setItemMeta (bookMeta);
+				} else
+					limitedItem.addEnchantments (toAdd);  // supposed to be reduced by above
+				// leave event.getEnchantsToAdd() as-is so that it still clears the next-enchant list
+			}	
 	
 			switch (event.whichButton()) // Now directly corresponds to charged levels.
 			{
@@ -230,7 +247,9 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 						returningLevels = 1; 
 					break;
 			}
-			if ( !getConfig().getBoolean ("Restore levels"))
+			if (enchants == 0)
+				returningLevels = event.whichButton() + 1; // all charged XP!
+			else if ( !getConfig().getBoolean ("Restore levels"))
 				returningLevels = 0;
 			final int returnedLevels = returningLevels;
 					
@@ -239,7 +258,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				@Override
 				public void run() {
 					if ( !player.isOnline()) {
-						log.info (language.get (player, "loggedoff", "{0} logged off before we could cancel anvil enchant", player.getName()));
+						log.info (language.get (player, "loggedoff3", "{0} logged off before we could reverse table enchant", player.getName()));
 						return;
 					}
 					InventoryView pInventory = player.getOpenInventory();
@@ -253,7 +272,11 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					iInventory.setItem (limitedItem); // give properly enchanted item back.
 					//* DEBUG */ log.info ("Replaced full result with " + limitedItem);		
 					
-					if (getConfig().getBoolean ("Restore levels") && returnedLevels > 0) {
+					if (returnedLevels > 0) {
+						ItemStack lapis = iInventory.getSecondary().clone();
+						lapis.setAmount (lapis.getAmount() + returnedLevels);
+						iInventory.setSecondary (lapis); 
+						
 						player.giveExpLevels (returnedLevels);							
 						player.sendMessage (language.get (player, "restored", chatName + " restored {0} XP", returnedLevels));
 					}
@@ -1335,7 +1358,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 						continue;  // doesn't trigger bcs getSection takes the last one
 					}
 					else 
-						log.info ("Found " + cs.getCurrentPath() + "." + itemString);
+						log.config ("Found " + cs.getCurrentPath() + "." + itemString);
 				} else {
 					log.warning ("Group_ names not allowed within " + cs.getCurrentPath());
 					continue;
