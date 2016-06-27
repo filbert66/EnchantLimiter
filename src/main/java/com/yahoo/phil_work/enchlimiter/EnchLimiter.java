@@ -33,6 +33,7 @@
  *  11 Jun 2016 : Spigot/Bukkit 1.10 compatibility; fixed NPE on armor equip & allow for shields; 
  *  24 Jun 2016 : Conditional use of Shields for 1.8 backward compatibility.
  *  25 Jun 2016 : Don't cancel enchant event if nothing left so that illegal enchant clears. 
+ *  27 Jun 2016 : Fixed dupe bug in anvil when DROP result.
  *
  * Bukkit BUG: Sometimes able to place items in Anvil & do restricted enchant; no ItemClickEvent!
  * Bukkit BUG: Sometimes able to hold an item with no itemHeldEvent!
@@ -222,7 +223,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			//*DEBUG*/ log.info ("Before adding, the item has: " + item.getEnchantments());
 			if ( !toAdd.isEmpty()) {
 				if (limitedItem.getType() == Material.BOOK || limitedItem.getType() == Material.ENCHANTED_BOOK) {
-					limitedItem.setType(Material.ENCHANTED_BOOK);
+					limitedItem.setType (Material.ENCHANTED_BOOK);
 					EnchantmentStorageMeta bookMeta = (EnchantmentStorageMeta)limitedItem.getItemMeta();
 					for (Enchantment e : toAdd.keySet())
 						bookMeta.addStoredEnchant (e, toAdd.get(e), true);
@@ -325,7 +326,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		Inventory inv = event.getInventory();
 		boolean limitMultiples = getConfig().getBoolean ("Limit Multiples", true);
 	
-		//log.info ("InventoryClickEvent " +event.getAction()+" in type " + inv.getType() + " in  slot " + event.getRawSlot() + "(raw " + event.getSlot()+ ") slotType "+ event.getSlotType());
+		//*DEBUG*/log.info ("InventoryClickEvent " +event.getAction()+" in type " + inv.getType() + " in  slot " + event.getRawSlot() + "(raw " + event.getSlot()+ ") slotType "+ event.getSlotType());
 		final InventoryAction action = event.getAction();
 		boolean isPlace = false;
 		switch (action) {
@@ -493,6 +494,16 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 											
 			if (stopThisRepair || hasIllegalAnvilEnchant (result, player))
 			{
+				switch (action) {
+					case DROP_ALL_SLOT:
+					case DROP_ONE_SLOT:
+						if (getConfig().getBoolean ("Message on cancel"))
+							player.sendMessage (language.get (player, "cancelled", chatName + ": You don't have permission to do that"));
+
+						log.info (language.get (Bukkit.getConsoleSender(), "attempted3", "{0} almost took result of a disallowed anvil enchant", player.getName()));
+						event.setCancelled (true); // don't allow dropping the result item!
+						return;
+				}
 				Integer ti = prevXP.get (player.getUniqueId());
 				if (ti == null)
 					log.warning ("Cannot restore XP; didn't record on place");
