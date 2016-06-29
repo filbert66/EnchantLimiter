@@ -34,6 +34,7 @@
  *  24 Jun 2016 : Conditional use of Shields for 1.8 backward compatibility.
  *  25 Jun 2016 : Don't cancel enchant event if nothing left so that illegal enchant clears. 
  *  27 Jun 2016 : Fixed dupe bug in anvil when DROP result.
+ *  27 Jun 2016 : Also check for disallowed villager (MERCHANT) trades; fix cast error on limited book enchant
  *
  * Bukkit BUG: Sometimes able to place items in Anvil & do restricted enchant; no ItemClickEvent!
  * Bukkit BUG: Sometimes able to hold an item with no itemHeldEvent!
@@ -224,7 +225,8 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			if ( !toAdd.isEmpty()) {
 				if (limitedItem.getType() == Material.BOOK || limitedItem.getType() == Material.ENCHANTED_BOOK) {
 					limitedItem.setType (Material.ENCHANTED_BOOK);
-					EnchantmentStorageMeta bookMeta = (EnchantmentStorageMeta)limitedItem.getItemMeta();
+					ItemStack ebook = new ItemStack (limitedItem); // to reset the meta to Storage type
+					EnchantmentStorageMeta bookMeta = (EnchantmentStorageMeta)ebook.getItemMeta(); //BUG: not always castable
 					for (Enchantment e : toAdd.keySet())
 						bookMeta.addStoredEnchant (e, toAdd.get(e), true);
 					limitedItem.setItemMeta (bookMeta);
@@ -460,19 +462,21 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		 * Conclusion: note in static hashmap Xp when they place item in anvil (or open it and erase when they close it)
 		 *   and then restore that if they've crafted something illegal. 
 		 */
-		if (inv.getType()== InventoryType.ANVIL && event.getSlotType() == SlotType.RESULT) {
+		final InventoryType iType = inv.getType();
+		if ((iType == InventoryType.ANVIL || iType==InventoryType.MERCHANT) && event.getSlotType() == SlotType.RESULT) {
 			//log.info ("Looks like you " + action + " " + event.getSlotType() + " " + event.getCurrentItem() + " with " + event.getCursor() + " on cursor");
 			ItemStack[] anvilContents = inv.getContents();
 			final ItemStack slot0 = anvilContents[0];
 			final ItemStack slot1 = anvilContents[1];
-			final int slot1Amount = slot1.getAmount();
+			final int slot0Amount = slot0 != null? slot0.getAmount() : 0;
+			final int slot1Amount = slot1 != null? slot1.getAmount() : 0;
 			ItemStack result = event.getCurrentItem();
 
 			//log.info ("Crafted from 0: " + slot0);
 			//log.info ("Crafted from 1: " + slot1);
 
 			// New feature: infinite anvil
-			if (getConfig().getBoolean ("Infinite anvils")) {
+			if (getConfig().getBoolean ("Infinite anvils") && iType == InventoryType.ANVIL) {
 				Block anvilBlock = player.getTargetBlock((HashSet<Byte>)null, 6);
 				if (anvilBlock != null && anvilBlock.getType() == Material.ANVIL) {	
 					//log.info ("Current anvil data: " + anvilBlock.getData());			
@@ -481,7 +485,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					log.warning ("Cannot find anvil to repair");
 			}			
 
-			final boolean isRepair = isRepair (slot0, slot1);
+			final boolean isRepair = iType == InventoryType.ANVIL && isRepair (slot0, slot1);
 			boolean stopThisRepair = false;
 			if (isRepair && getConfig().getBoolean ("Stop all repairs")) {
 				if ( !player.hasPermission ("enchlimiter.allrepairs")) {
@@ -505,7 +509,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 						return;
 				}
 				Integer ti = prevXP.get (player.getUniqueId());
-				if (ti == null)
+				if (ti == null && iType == InventoryType.ANVIL)
 					log.warning ("Cannot restore XP; didn't record on place");
 				final int playerXP = (ti != null? ti : player.getLevel());
 				final PlayerInventory pinv = player.getInventory();
@@ -523,16 +527,18 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					}
 					
 					// Repair anvil before it is destroyed and can't return item in runLater task
-					Block anvilBlock = player.getTargetBlock((HashSet<Byte>)null, 6);
-					if (anvilBlock != null && anvilBlock.getType() == Material.ANVIL) {
-						Byte pData = prevAnvilData.get (player.getUniqueId());
-						if (pData != null) {
-							anvilBlock.setData (pData);
-							// log.info ("restored anvil data to " + pData);
+					if (iType == InventoryType.ANVIL) {
+						Block anvilBlock = player.getTargetBlock((HashSet<Byte>)null, 6);
+						if (anvilBlock != null && anvilBlock.getType() == Material.ANVIL) {
+							Byte pData = prevAnvilData.get (player.getUniqueId());
+							if (pData != null) {
+								anvilBlock.setData (pData);
+								// log.info ("restored anvil data to " + pData);
+							} else
+								log.warning ("Don't have stored anvil repair state to restore");
 						} else
-							log.warning ("Don't have stored anvil repair state to restore");
-					} else
-						log.warning ("Cannot find anvil to repair");
+							log.warning ("Cannot find anvil to repair");
+					} 
 				}
 				
 				class anvilUndoer extends BukkitRunnable {
@@ -542,12 +548,14 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 							log.info (language.get (player, "loggedoff", "{0} logged off before we could cancel anvil enchant", player.getName()));
 							return;
 						}
-						if (player.getOpenInventory().getTopInventory().getType() != InventoryType.ANVIL) {
+						if (player.getOpenInventory().getTopInventory().getType() != iType) {
 							log.warning (language.get (player, "theft", "{0} closed inventory or anvil died and got an illegal item: {1}", player.getName(), crafted));
 							return;
 						}
-						AnvilInventory aInventory = (AnvilInventory)player.getOpenInventory().getTopInventory();
+						Inventory aInventory = player.getOpenInventory().getTopInventory();
 						InventoryView pInventory = player.getOpenInventory();
+						int newSlot0Amount = slot0Amount;
+						int newSlot1Amount = slot1Amount;
 
 						// Execute cancel
 						if (action == InventoryAction.MOVE_TO_OTHER_INVENTORY || 
@@ -564,9 +572,26 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 										pinv.clear (i);
 									else { // downgrade it
 										ItemStack fixer = pinv.getItem(i);
+										int beforeLevels = getTotalEnchantLevels (fixer);
 										fixAnvilItem (fixer, player);
-										pinv.setItem (i, fixer);										
-										return;  // don't return ingredients or restore levels
+										pinv.setItem (i, fixer);	
+										
+										if (iType == InventoryType.ANVIL)
+											return; // don't return ingredients or restore levels
+										else { 	// return some ingredients on MERCHANT trades
+											// Code duplicated below; modify BOTH
+											float returnFraction = 1.0F - (float)getTotalEnchantLevels (fixer) / beforeLevels;
+											//*DEBUG*/log.info ("returning " + returnFraction + " of ingredients");
+											if (slot0Amount > 0) {
+												int used = slot0Amount - aInventory.getItem (0).getAmount();
+												newSlot0Amount = aInventory.getItem (0).getAmount() + (int)(used * returnFraction); // round down
+											}
+											if (slot1Amount > 0) {
+												int used = slot1Amount - aInventory.getItem (1).getAmount();
+												newSlot1Amount = aInventory.getItem (1).getAmount() + (int)(used * returnFraction); // round down
+											}
+											// fall through to Return Ingredients
+										}
 									}
 									//log.info ("Found and removed illegal item in raw slot " + i);		
 									found = true;
@@ -579,20 +604,46 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 								log.warning ("could not find illegal result in inventory on shift-click by " + player.getName());								
 						} else if (doDowngrade) {
 							ItemStack fixer = pInventory.getCursor() ;
+							int beforeLevels = getTotalEnchantLevels (fixer);
 							fixAnvilItem (fixer, player);
 							pInventory.setCursor (fixer);	
-							return;  // don't return ingredients or restore levels
+							
+							if (iType == InventoryType.ANVIL)
+								return; // don't return ingredients or restore levels
+							else { 	// TODO: return some ingredients on MERCHANT trades
+								// Code duplicated above; modify BOTH
+								float returnFraction = 1.0F - (float)getTotalEnchantLevels (fixer) / beforeLevels;
+								//*DEBUG*/log.info ("returning " + returnFraction + " of ingredients");
+								if (slot0Amount > 0) {
+									int newAmount = aInventory.getItem (0).getAmount();
+									int used = slot0Amount - newAmount;
+									newSlot0Amount = newAmount + (int)(used * returnFraction); // round down
+								}
+								if (slot1Amount > 0) {
+									int newAmount = aInventory.getItem (1).getAmount();
+									int used = slot1Amount - newAmount;
+									newSlot1Amount = newAmount + (int)(used * returnFraction); // round down
+								}
+								// fall through to Return Ingredients
+							}
 						} else
 							pInventory.setCursor (null); // take away illegal item in hand
 						
-						aInventory.setItem(0, slot0); // return craft ingredient 1
-						slot1.setAmount (slot1Amount); // when repairing with raw materials, sometimes the amount changed
-						aInventory.setItem(1, slot1); // return craft ingredient 2
-						log.fine ("returned slot1: " + slot1);
+						// Return Ingredients
+						if (slot0 != null) {
+							slot0.setAmount (newSlot0Amount); // villager trades often can use either slot
+							aInventory.setItem(0, slot0); // return craft ingredient 1
+						}
+						if (slot1 != null) {
+							slot1.setAmount (newSlot1Amount); // when repairing with raw materials, sometimes the amount changed
+							aInventory.setItem(1, slot1); // return craft ingredient 2
+						}
+						//log.fine ("returned slot1: " + slot1);
 						
-						if (getConfig().getBoolean ("Restore levels"))
+						if (iType == InventoryType.ANVIL && getConfig().getBoolean ("Restore levels"))
 							player.setLevel (playerXP);
-												
+							
+						if (doDowngrade) return;					
 						if (getConfig().getBoolean ("Message on cancel"))
 							player.sendMessage (language.get (player, "cancelled", chatName + ": You don't have permission to do that"));
 
@@ -1247,7 +1298,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			else {
 				enchant = Enchantment.getByName (enchantString);
 			}
-			if (enchant == null) 
+			if (enchant == null && !enchantString.equals ("ALL")) 
 				log.warning (cs.getCurrentPath()+"." +matString + ": Unknown enchantment '" + enchantString+ "'. Refer to http://bit.ly/EnchLimit");
 			else
 				results.put (enchant, level);
@@ -1331,6 +1382,17 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 
 		return results;
 	}  	
+	
+	private int getTotalEnchantLevels (final ItemStack item) {
+		int total = 0;
+		ItemMeta meta = item.getItemMeta();
+
+		if ( !meta.hasEnchants())
+			return 0;
+		for (Enchantment e : meta.getEnchants().keySet()) 
+			total += meta.getEnchantLevel (e);	
+		return total;
+	}
 	
 	static private HashSet<String> Global_Groups = null;
 	static private HashSet<String> Table_Groups = null;
