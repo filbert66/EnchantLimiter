@@ -280,8 +280,9 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 						lapis.setAmount (lapis.getAmount() + returnedLevels);
 						iInventory.setSecondary (lapis); 
 						
-						player.giveExpLevels (returnedLevels);							
-						player.sendMessage (language.get (player, "restored", chatName + " restored {0} XP", returnedLevels));
+						player.giveExpLevels (returnedLevels);	
+						if (getConfig().getBoolean ("Message on restore XP", true))
+							player.sendMessage (language.get (player, "restored", chatName + " restored {0} XP", returnedLevels));
 					}
 				}
 			}

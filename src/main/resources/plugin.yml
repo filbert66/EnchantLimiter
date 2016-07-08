@@ -7,7 +7,7 @@
 
 name: EnchLimiter
 main: com.yahoo.phil_work.enchlimiter.EnchLimiter
-version: 2.3
+version: 2.4
 author: filbert66
 description: Limits enchants by multiples or configured list
 website: dev.bukkit.org/bukkit-plugins/enchlimiter

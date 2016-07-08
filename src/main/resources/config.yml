@@ -6,6 +6,7 @@ Message on cancel: true
 Message on limit: true
 Message on disallowed: true
 Message on cancel hold: true
+Message on restore XP: true
 Limit Multiples: true
 Stop pickup: false
 Restore levels: true
