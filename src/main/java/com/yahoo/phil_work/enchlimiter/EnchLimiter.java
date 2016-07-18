@@ -35,6 +35,7 @@
  *  25 Jun 2016 : Don't cancel enchant event if nothing left so that illegal enchant clears. 
  *  27 Jun 2016 : Fixed dupe bug in anvil when DROP result.
  *  27 Jun 2016 : Also check for disallowed villager (MERCHANT) trades; fix cast error on limited book enchant
+ *  18 Jul 2016 : Added "ALL_ARMOR_*" shortcuts.
  *
  * Bukkit BUG: Sometimes able to place items in Anvil & do restricted enchant; no ItemClickEvent!
  * Bukkit BUG: Sometimes able to hold an item with no itemHeldEvent!
@@ -1365,7 +1366,31 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				results.putAll (getDisallowedEnchants (cs, "ALL_LEGGINGS"));	
 				results.putAll (getDisallowedEnchants (cs, "ALL_PANTS"));	
 			} else if (MaterialCategory.isBarding (m)) 
-				results.putAll (getDisallowedEnchants (cs, "ALL_BARDING"));					
+				results.putAll (getDisallowedEnchants (cs, "ALL_BARDING"));		
+			switch (MaterialCategory.getRawMaterial (m)) {
+				case LEATHER:
+					results.putAll (getDisallowedEnchants (cs, "ALL_ARMOR_LEATHER"));
+					break;
+				case GOLD_INGOT:
+					results.putAll (getDisallowedEnchants (cs, "ALL_ARMOR_GOLD"));
+					break;
+				case DIAMOND: 
+					results.putAll (getDisallowedEnchants (cs, "ALL_ARMOR_DIAMOND"));
+					break;
+				case IRON_INGOT:
+					switch (m) {
+						case CHAINMAIL_BOOTS:
+						case CHAINMAIL_CHESTPLATE:
+						case CHAINMAIL_HELMET:
+						case CHAINMAIL_LEGGINGS:
+							results.putAll (getDisallowedEnchants (cs, "ALL_ARMOR_CHAIN"));
+							break;
+						default:
+							results.putAll (getDisallowedEnchants (cs, "ALL_ARMOR_IRON"));
+							break;
+					}
+					break;
+			}									
 		}
 
 		results.putAll (getDisallowedEnchants (cs, matString));			
@@ -1420,7 +1445,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		//log.info ("Checking section " + cs.getCurrentPath());
 		for (String itemString : cs.getKeys (false /*depth*/)) {
 			Material m = Material.matchMaterial (itemString);
-			if (itemString.equals("ALL") || itemString.equals ("ALL_ARMOR") || itemString.equals ("ALL_BARDING") || (itemString.startsWith ("ALL_") && itemString.endsWith ("S"))) {
+			if (itemString.equals("ALL") || itemString.startsWith ("ALL_ARMOR") || itemString.equals ("ALL_BARDING") || (itemString.startsWith ("ALL_") && itemString.endsWith ("S"))) {
 				log.config (cs.getCurrentPath() +"."+ itemString + ":" + getDisallowedEnchants (cs, itemString));	
 				continue;
 			} else if (m == null && itemString.startsWith ("Group_")) {
