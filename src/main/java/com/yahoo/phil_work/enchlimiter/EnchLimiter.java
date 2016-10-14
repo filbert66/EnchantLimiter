@@ -36,6 +36,7 @@
  *  27 Jun 2016 : Fixed dupe bug in anvil when DROP result.
  *  27 Jun 2016 : Also check for disallowed villager (MERCHANT) trades; fix cast error on limited book enchant
  *  18 Jul 2016 : Added "ALL_ARMOR_*" shortcuts.
+ *  13 Oct 2016 : Try to fix dupe bug in enchantMonitor
  *
  * Bukkit BUG: Sometimes able to place items in Anvil & do restricted enchant; no ItemClickEvent!
  * Bukkit BUG: Sometimes able to hold an item with no itemHeldEvent!
@@ -273,6 +274,11 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					EnchantingInventory iInventory = (EnchantingInventory)player.getOpenInventory().getTopInventory();
 
 					// Execute limit
+					if (iInventory.getItem() == null || iInventory.getItem().getType() != limitedItem.getType())
+					{ // They took item before we could give it back.
+						log.warning (language.get (player, "theft", "{0} closed inventory or table died and got an illegal item: {1}", player.getName(), limitedItem.getType()));
+						return;
+					} // else
 					iInventory.setItem (limitedItem); // give properly enchanted item back.
 					//* DEBUG */ log.info ("Replaced full result with " + limitedItem);		
 					
