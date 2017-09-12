@@ -56,6 +56,7 @@ import java.util.HashSet;
 import java.util.logging.Logger;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.io.FileInputStream;
 import java.net.URLDecoder;
@@ -479,7 +480,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 
 			// New feature: infinite anvil
 			if (getConfig().getBoolean ("Infinite anvils") && iType == InventoryType.ANVIL) {
-				Block anvilBlock = player.getTargetBlock((HashSet<Byte>)null, 6);
+				Block anvilBlock = player.getTargetBlock((Set<Material>)null, 6);
 				if (anvilBlock != null && anvilBlock.getType() == Material.ANVIL) {	
 					//log.info ("Current anvil data: " + anvilBlock.getData());			
 					anvilBlock.setData ((byte)(anvilBlock.getData () & 0x03));  // 0=undamaged; bits 0-1 are compass orientation on Block
@@ -530,7 +531,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					
 					// Repair anvil before it is destroyed and can't return item in runLater task
 					if (iType == InventoryType.ANVIL) {
-						Block anvilBlock = player.getTargetBlock((HashSet<Byte>)null, 6);
+						Block anvilBlock = player.getTargetBlock((Set<Material>)null, 6);
 						if (anvilBlock != null && anvilBlock.getType() == Material.ANVIL) {
 							Byte pData = prevAnvilData.get (player.getUniqueId());
 							if (pData != null) {
@@ -672,7 +673,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				// Remember for later, in case we need it. 
 				Integer curXP = player.getLevel();	// need to get/set levels, not XP (progress to next)
 				prevXP.put (player.getUniqueId(), curXP);
-				Block anvil = player.getTargetBlock ((HashSet<Byte>)null,6);
+				Block anvil = player.getTargetBlock((Set<Material>)null,6);
 				if (anvil != null && anvil.getType() == Material.ANVIL)
 					prevAnvilData.put (player.getUniqueId(), anvil.getData());
 				//*DEBUG*/ log.info ("saved XP at " + curXP);
