@@ -37,6 +37,7 @@
  *  27 Jun 2016 : Also check for disallowed villager (MERCHANT) trades; fix cast error on limited book enchant
  *  18 Jul 2016 : Added "ALL_ARMOR_*" shortcuts.
  *  13 Oct 2016 : Try to fix dupe bug in enchantMonitor
+ *  12 Sep 2017 : Spigot 1.12: Update getTargetBlock to Set<Material>; fixed right-shift dupe bug in anvil/villager
  *
  * Bukkit BUG: Sometimes able to place items in Anvil & do restricted enchant; no ItemClickEvent!
  * Bukkit BUG: Sometimes able to hold an item with no itemHeldEvent!
@@ -54,6 +55,7 @@ import java.io.File;
 import java.util.Collections;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.Set;
 import java.util.logging.Logger;
 import java.util.HashMap;
 import java.util.Map;
@@ -147,7 +149,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		
 		// Get List of disallowed enchants for that item and for ALL items
 		Map<Enchantment, Integer> disallowedEnchants = getDisallowedTableEnchants (item.getType(), player);
-		// log.config ("disallowed on " + item.getType() +":" + disallowedEnchants);
+		// log.config ("Multiples" + (limitMultiples ? " & " : " allowed, ") + (player.hasPermission ("enchlimiter.disallowed") ? (player.getName() + " has .disallowed") : ("disallowed on " + item.getType() +":" + disallowedEnchants) ) );
 		
 		if ( !limitMultiples && disallowedEnchants.isEmpty())
 			return;  // nothing to do; leave event alive for another plugin
@@ -160,13 +162,15 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			totalLevels += event.getEnchantsToAdd().get(e);
 		final int initialCost = event.getExpLevelCost();		
 		float XPperLevel = initialCost; XPperLevel /= totalLevels;
-		//*DEBUG*/log.info ("Total enchants: " + toAdd.size() + ". Total levels: " + totalLevels + ". XP/lvl = " + XPperLevel);
+		//*DEBUG*/log.info ("Total enchants: " + event.getEnchantsToAdd().size() + ". Total levels: " + totalLevels + ". XP/lvl = " + XPperLevel);
 			
 		int returningLevels = 0;
 
 		for (Enchantment ench : event.getEnchantsToAdd().keySet()) {
 			int level = event.getEnchantsToAdd().get(ench);
 			int returnedXP = (int)(0.5F + (XPperLevel * level));
+			
+			//* DEBUG */ log.info ("considering " + ench + "-" + level + " enchantment on " +item);
 
 			if ( !limitMultiples || enchants == 0) {
 				if (disallowedEnchants.containsKey (ench) && level >= disallowedEnchants.get (ench) &&
@@ -472,7 +476,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		 */
 		final InventoryType iType = inv.getType();
 		if ((iType == InventoryType.ANVIL || iType==InventoryType.MERCHANT) && event.getSlotType() == SlotType.RESULT) {
-			//log.info ("Looks like you " + action + " " + event.getSlotType() + " " + event.getCurrentItem() + " with " + event.getCursor() + " on cursor");
+			// log.info ("Looks like you " + action + " " + event.getSlotType() + " " + event.getCurrentItem() + " with " + event.getCursor() + " on cursor");
 			ItemStack[] anvilContents = inv.getContents();
 			final ItemStack slot0 = anvilContents[0];
 			final ItemStack slot1 = anvilContents[1];
@@ -485,7 +489,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 
 			// New feature: infinite anvil
 			if (getConfig().getBoolean ("Infinite anvils") && iType == InventoryType.ANVIL) {
-				Block anvilBlock = player.getTargetBlock((HashSet<Byte>)null, 6);
+				Block anvilBlock = player.getTargetBlock((Set<Material>)null, 6);
 				if (anvilBlock != null && anvilBlock.getType() == Material.ANVIL) {	
 					//log.info ("Current anvil data: " + anvilBlock.getData());			
 					anvilBlock.setData ((byte)(anvilBlock.getData () & 0x03));  // 0=undamaged; bits 0-1 are compass orientation on Block
@@ -509,6 +513,12 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				switch (action) {
 					case DROP_ALL_SLOT:
 					case DROP_ONE_SLOT:
+					case PICKUP_HALF:
+					case PICKUP_ONE:
+					case PICKUP_SOME:
+					case PICKUP_ALL:
+					case MOVE_TO_OTHER_INVENTORY:
+					case HOTBAR_MOVE_AND_READD:
 						if (getConfig().getBoolean ("Message on cancel"))
 							player.sendMessage (language.get (player, "cancelled", chatName + ": You don't have permission to do that"));
 
@@ -536,7 +546,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					
 					// Repair anvil before it is destroyed and can't return item in runLater task
 					if (iType == InventoryType.ANVIL) {
-						Block anvilBlock = player.getTargetBlock((HashSet<Byte>)null, 6);
+						Block anvilBlock = player.getTargetBlock((Set<Material>)null, 6);
 						if (anvilBlock != null && anvilBlock.getType() == Material.ANVIL) {
 							Byte pData = prevAnvilData.get (player.getUniqueId());
 							if (pData != null) {
@@ -678,7 +688,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				// Remember for later, in case we need it. 
 				Integer curXP = player.getLevel();	// need to get/set levels, not XP (progress to next)
 				prevXP.put (player.getUniqueId(), curXP);
-				Block anvil = player.getTargetBlock ((HashSet<Byte>)null,6);
+				Block anvil = player.getTargetBlock ((Set<Material>)null,6);
 				if (anvil != null && anvil.getType() == Material.ANVIL)
 					prevAnvilData.put (player.getUniqueId(), anvil.getData());
 				//*DEBUG*/ log.info ("saved XP at " + curXP);
