@@ -38,6 +38,7 @@
  *  18 Jul 2016 : Added "ALL_ARMOR_*" shortcuts.
  *  13 Oct 2016 : Try to fix dupe bug in enchantMonitor
  *  12 Sep 2017 : Spigot 1.12: Update getTargetBlock to Set<Material>; fixed right-shift dupe bug in anvil/villager
+ *  18 Sep 2017 : Fix NPE when giving back lapis.
  *
  * Bukkit BUG: Sometimes able to place items in Anvil & do restricted enchant; no ItemClickEvent!
  * Bukkit BUG: Sometimes able to hold an item with no itemHeldEvent!
@@ -287,9 +288,11 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					//* DEBUG */ log.info ("Replaced full result with " + limitedItem);		
 					
 					if (returnedLevels > 0) {
-						ItemStack lapis = iInventory.getSecondary().clone();
-						lapis.setAmount (lapis.getAmount() + returnedLevels);
-						iInventory.setSecondary (lapis); 
+						if (iInventory.getSecondary() != null) {
+							ItemStack lapis = iInventory.getSecondary().clone();
+							lapis.setAmount (lapis.getAmount() + returnedLevels);
+							iInventory.setSecondary (lapis); 
+						}
 						
 						player.giveExpLevels (returnedLevels);	
 						if (getConfig().getBoolean ("Message on restore XP", true))
