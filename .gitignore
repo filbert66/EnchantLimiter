@@ -8,3 +8,23 @@ src/main/java/com/yahoo/phil_work/unbreakable/build
 testprep
 
 update
+
+.DS_Store
+
+.gitignore
+
+src/main/java/com/yahoo/phil_work/build
+
+src/main/java/com/yahoo/phil_work/enchlimiter/build
+
+src/main/java/com/yahoo/phil_work/enchlimiter/build
+
+.gitignore
+
+src/main/java/com/yahoo/phil_work/build
+
+src/main/java/com/yahoo/phil_work/enchlimiter/build
+
+src/main/java/com/yahoo/phil_work/enchlimiter/build
+
+.gitignore

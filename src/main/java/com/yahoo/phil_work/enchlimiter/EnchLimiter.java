@@ -38,13 +38,16 @@
  *  18 Jul 2016 : Added "ALL_ARMOR_*" shortcuts.
  *  13 Oct 2016 : Try to fix dupe bug in enchantMonitor
  *  12 Sep 2017 : Spigot 1.12: Update getTargetBlock to Set<Material>; fixed right-shift dupe bug in anvil/villager
- *  18 Sep 2017 : Fix NPE when giving back lapis.
+ *  18 Sep 2017 : Fix NPE when giving back lapis. 
+ *  11 Dec 2017 : allow renaming of disallowed items
+ *  12 Dec 2017 : configurable Max Enchants Allowed.
  *
  * Bukkit BUG: Sometimes able to place items in Anvil & do restricted enchant; no ItemClickEvent!
  * Bukkit BUG: Sometimes able to hold an item with no itemHeldEvent!
  * 
  * TODO: 
  *   commands for modifying 'Disallowed enchants'
+ *   
  */
 
 package com.yahoo.phil_work.enchlimiter;
@@ -139,6 +142,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 	//  If disallowed enchants reduces a L3 1/3rd, should charge only two, but Bukkit doesn't give a way to do that with 
 	//    the event, so have to manually reset the level on returning.
 	// Priority = HIGH so that this gets called _after_ Unbreakable so that the clone we return has the Unbreakable tag set. 
+	// now refers to configurable "Max Enchants Allowed".
 	@EventHandler (ignoreCancelled = true, priority = EventPriority.HIGH )
 	void enchantMonitor (EnchantItemEvent event) {
 		final Player player = event.getEnchanter();
@@ -166,6 +170,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		//*DEBUG*/log.info ("Total enchants: " + event.getEnchantsToAdd().size() + ". Total levels: " + totalLevels + ". XP/lvl = " + XPperLevel);
 			
 		int returningLevels = 0;
+		final int maxEnchants = getConfig().getInt ("Max Enchants Allowed", 1);
 
 		for (Enchantment ench : event.getEnchantsToAdd().keySet()) {
 			int level = event.getEnchantsToAdd().get(ench);
@@ -173,7 +178,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			
 			//* DEBUG */ log.info ("considering " + ench + "-" + level + " enchantment on " +item);
 
-			if ( !limitMultiples || enchants == 0) {
+			if ( !limitMultiples || enchants < maxEnchants) {
 				if (disallowedEnchants.containsKey (ench) && level >= disallowedEnchants.get (ench) &&
 					! player.hasPermission ("enchlimiter.disallowed") ) 
 				{
@@ -320,6 +325,11 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			return true;
 			
 		return false;
+	}
+	
+	boolean isRename (final ItemStack slot0, final ItemStack slot1, final ItemStack result) {
+		return (slot1 == null && slot0 != null && result != null &&
+				slot0.getType() == result.getType() );
 	}
 		
 
@@ -509,6 +519,10 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					log.info ("Allowing repair by " + player.getName());
 					return; // also allows if repair has illegal enchant.
 				}
+			}
+			if (isRename (slot0, slot1, result)) {
+				log.info ("Allowing rename of illegal item");
+				return; //  allow if renamed item has illegal enchant.
 			}
 											
 			if (stopThisRepair || hasIllegalAnvilEnchant (result, player))
@@ -760,6 +774,9 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				}	
 			} else {
 				EnchantmentStorageMeta bookStore = (EnchantmentStorageMeta)meta;
+				int newEnchants = 0;
+				final int maxEnchants = getConfig().getInt ("Max Enchants Allowed", 1);
+				
 				for (Enchantment e: bookStore.getStoredEnchants().keySet()) {
 					//*DEBUG*/log.info ("testing for " + e + "-" + bookStore.getStoredEnchantLevel(e));
 					if (disallowedEnchants.containsKey (e)) {
@@ -772,10 +789,30 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 							if (book1.getStoredEnchantLevel (e) >= disallowedEnchants.get(e) - 1) {
 								disallowed = true;	// trying to boost one book with another
 							 	violators.add (e);
+							} 
+							if ( ! book1.hasStoredEnchant (e)) 
+							{ /* e is not a shared enchantment across the 2 books*/
+								newEnchants++;
+								if (limitMultiples && newEnchants + bookStore.getStoredEnchants().size() > maxEnchants) {
+									disallowed = true;
+									violators.add (e);
+								}
 							}
 						} else if (tool.getEnchantmentLevel (e) >= disallowedEnchants.get(e) - 1) {
 							disallowed = true;	// trying to boost enchant of existing item at limit
 							violators.add (e);
+						}
+					}
+				}
+				if (limitMultiples && bookPlusBook) { // need to check for extra enchants from second book
+					EnchantmentStorageMeta book1 = (EnchantmentStorageMeta)tool.getItemMeta();	
+					for (Enchantment e: book1.getStoredEnchants().keySet()) {
+						if ( ! bookStore.hasStoredEnchant (e)) {
+							newEnchants++;
+							if (newEnchants + bookStore.getStoredEnchants().size() > maxEnchants) {
+								disallowed = true;
+								violators.add (e);
+							}
 						}
 					}
 				}
@@ -784,7 +821,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			if (event.getWhoClicked().hasPermission ("enchlimiter.disallowed"))
 				disallowed = false;
 		
-			if (disallowed || (limitMultiples && bookPlusBook))
+			if (disallowed)
 			{
 				final ItemStack slot0 = tool.clone(), slot1 = book;
 				final boolean disallowedEntry = disallowed;
@@ -1014,7 +1051,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			return false;  // nothing to do; leave event alive for another plugin
 			
 		// Check for multiples
-		if (limitMultiples && item.getEnchantments().size() > 1)
+		if (limitMultiples && item.getEnchantments().size() > getConfig().getInt ("Max Enchants Allowed", 1))
 			return true;
 		else if (p != null && p.hasPermission ("enchlimiter.disallowed"))
 			return false;	// no need to check
@@ -1102,6 +1139,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			(p == null || ! p.hasPermission ("enchlimiter.multiple"));
 		
 		int enchants = 0;
+		final int maxEnchants = getConfig().getInt ("Max Enchants Allowed", 1);
 		
 		ItemMeta meta = item.getItemMeta();
 		if ( meta instanceof EnchantmentStorageMeta) {
@@ -1121,7 +1159,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		for (Enchantment ench : onItem.keySet()) {
 			int level = onItem.get(ench);
 
-			if ( !limitMultiples || enchants == 0) {
+			if ( !limitMultiples || enchants < maxEnchants) {
 				if (disallowedEnchants.containsKey (ench) && level >= disallowedEnchants.get (ench) &&
 					(p == null || ! p.hasPermission ("enchlimiter.disallowed")) ) 
 				{
@@ -1172,6 +1210,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			(p == null || ! p.hasPermission ("enchlimiter.multiple"));
 		
 		int enchants = 0;
+		final int maxEnchants = getConfig().getInt ("Max Enchants Allowed", 1);
 		EnchantmentStorageMeta meta = (EnchantmentStorageMeta)item.getItemMeta();
 		
 		if ( !meta.hasStoredEnchants() || (!limitMultiples && disallowedEnchants.isEmpty()))
@@ -1184,7 +1223,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		for (Enchantment ench : onItem.keySet()) {
 			int level = onItem.get(ench);
 
-			if ( !limitMultiples || enchants == 0) {
+			if ( !limitMultiples || enchants < maxEnchants) {
 				if (disallowedEnchants.containsKey (ench) && level >= disallowedEnchants.get (ench) &&
 					(p == null || ! p.hasPermission ("enchlimiter.disallowed")) ) 
 				{

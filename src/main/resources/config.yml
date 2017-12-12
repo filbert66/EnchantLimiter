@@ -1,6 +1,7 @@
 # changed default 'Fix held items' to true, due to bug
 # added Apply_on_global_check, 'Message on cancel hold'
 # 'Downgrade in anvil' replaced 'downgrade repairs'
+# 2.7: added 'Max Enchants Allowed'
 
 Message on cancel: true
 Message on limit: true
@@ -15,6 +16,7 @@ Fix spawned items: false
 Infinite anvils: false
 Fix held items: true
 Downgrade in anvil: false
+Max Enchants Allowed: 1
 
 Apply_on_global_check:
   anvil: false
