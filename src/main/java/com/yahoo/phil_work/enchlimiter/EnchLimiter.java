@@ -41,6 +41,8 @@
  *  18 Sep 2017 : Fix NPE when giving back lapis. 
  *  11 Dec 2017 : allow renaming of disallowed items
  *  12 Dec 2017 : configurable Max Enchants Allowed.
+ *  19 May 2018 : Squash "Cannot find armor to fix" when non-shield in shield slot.
+ *  02 Jun 2018 : Fix bug with books on enchant tables.
  *
  * Bukkit BUG: Sometimes able to place items in Anvil & do restricted enchant; no ItemClickEvent!
  * Bukkit BUG: Sometimes able to hold an item with no itemHeldEvent!
@@ -75,6 +77,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
+import org.bukkit.DyeColor;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.inventory.*;
 import org.bukkit.inventory.meta.EnchantmentStorageMeta;
@@ -102,6 +105,7 @@ import org.bukkit.event.player.PlayerItemHeldEvent;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.material.MaterialData;
+import org.bukkit.material.Dye;
 import org.bukkit.material.DirectionalContainer;
 import org.bukkit.plugin.*;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -284,8 +288,11 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					EnchantingInventory iInventory = (EnchantingInventory)player.getOpenInventory().getTopInventory();
 
 					// Execute limit
-					if (iInventory.getItem() == null || iInventory.getItem().getType() != limitedItem.getType())
+					if (iInventory.getItem() == null || 
+						(iInventory.getItem().getType() != limitedItem.getType() &&
+						 !(limitedItem.getType() == Material.BOOK && iInventory.getItem().getType() == Material.ENCHANTED_BOOK) ) ) // expected item is book, but table changes it.
 					{ // They took item before we could give it back.
+						//*DEBUG*/ log.warning ("Didn't find expected item " + limitedItem.getType() + " but found " + iInventory.getItem().getType());
 						log.warning (language.get (player, "theft", "{0} closed inventory or table died and got an illegal item: {1}", player.getName(), limitedItem.getType()));
 						return;
 					} // else
@@ -293,12 +300,21 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					//* DEBUG */ log.info ("Replaced full result with " + limitedItem);		
 					
 					if (returnedLevels > 0) {
+						ItemStack lapis;
 						if (iInventory.getSecondary() != null) {
-							ItemStack lapis = iInventory.getSecondary().clone();
-							lapis.setAmount (lapis.getAmount() + returnedLevels);
-							iInventory.setSecondary (lapis); 
+							lapis = iInventory.getSecondary().clone();
+						} else { // there is always at least one
+							Dye LMD = new Dye (DyeColor.BLUE);
+							// call without deprecated use of byte data not working; trying that then. Works!
+							lapis = new ItemStack (LMD.getItemType(), 0, (short)0, LMD.getData()); // stack of 0 items for now
+							lapis.setData (LMD);
 						}
-						
+						lapis.setAmount (lapis.getAmount() + returnedLevels);
+						//*DEBUG*/ log.info ("lapis data is " + lapis.getData());
+						iInventory.setSecondary (lapis); 
+						iInventory.getSecondary ().setData (lapis.getData()); // above call doesn't seem to setData
+						//*DEBUG*/ log.info ("Inventory lapis data is " + iInventory.getSecondary().getData());
+
 						player.giveExpLevels (returnedLevels);	
 						if (getConfig().getBoolean ("Message on restore XP", true))
 							player.sendMessage (language.get (player, "restored", chatName + " restored {0} XP", returnedLevels));
@@ -386,7 +402,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		final int SHIELD_CLICK_SLOT = 45;
 		final int SHIELD_SLOT = 40;
 		if ((event.getSlotType() == SlotType.ARMOR && isPlace) ||
-		 	(inv.getType() == InventoryType.CRAFTING && isPlace && event.getRawSlot() == SHIELD_CLICK_SLOT ) || 
+		 	(inv.getType() == InventoryType.CRAFTING && isPlace && event.getRawSlot() == SHIELD_CLICK_SLOT && SUPPORT_SHIELD && event.getCurrentItem().getType() == Material.SHIELD) || 
 		    (inv.getType() == InventoryType.CRAFTING && event.getAction() == InventoryAction.MOVE_TO_OTHER_INVENTORY && 
 		     (MaterialCategory.isArmor (event.getCurrentItem().getType()) || 
 		     	(SUPPORT_SHIELD && event.getCurrentItem().getType() == Material.SHIELD) )
@@ -408,6 +424,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				case MOVE_TO_OTHER_INVENTORY: 
 					item = event.getCurrentItem();
 					Material m = item.getType();
+					// if moving an item to a full slot, do nothing
 					if (MaterialCategory.isHelmet(m) && pinv.getHelmet() != null)
 						return;
 					if (MaterialCategory.isChestplate(m) && pinv.getChestplate() != null)
@@ -418,7 +435,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 						return;
 					if (SUPPORT_SHIELD && m == Material.SHIELD && pinv.getItem (SHIELD_SLOT) != null)
 						return;
-					// log.info ("Confirmed moving " + item.getType() + " to open armor slot");
+					//*DEBUG*/ log.info ("Confirmed moving " + item.getType() + " to open armor slot");
 					break;
 				case HOTBAR_SWAP:
 				case HOTBAR_MOVE_AND_READD:	
@@ -433,7 +450,8 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			if (item != null)	{
 				// BUG on PLACE, HOT: duplicates fixed item in armor slot and on cursor, so try RunLater
 				final Player p = player;
-				final ItemStack fixMe = item;
+				final ItemStack fixMe = item.clone();
+				//* DEBUG */log.info ("About to try to fix " + fixMe);
 			
 				class armorFixer extends BukkitRunnable {
 					@Override
@@ -456,6 +474,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 									found = true;
 								}
 							}
+							//* DEBUG */log.info ("After isSimilar on " + i + ", fixMe is " + fixMe);
 						}
 						if (found) 
 							pInventory.setArmorContents (armor);				
@@ -465,7 +484,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 								fixItem (shield, p);
 								pInventory.setItem (SHIELD_SLOT, shield);
 							} else	
-								log.warning ("Cannot find armor to fix: " + fixMe);
+								log.warning ("Cannot find armor to fix: " + fixMe + "; instead found " + shield);
 						}  
 					}
 				} // end armorFixer class
