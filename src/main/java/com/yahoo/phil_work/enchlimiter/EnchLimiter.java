@@ -43,6 +43,7 @@
  *  12 Dec 2017 : configurable Max Enchants Allowed.
  *  19 May 2018 : Squash "Cannot find armor to fix" when non-shield in shield slot.
  *  02 Jun 2018 : Fix bug with books on enchant tables.
+ *  15 Mar 2019 : Add lore-specific protection
  *
  * Bukkit BUG: Sometimes able to place items in Anvil & do restricted enchant; no ItemClickEvent!
  * Bukkit BUG: Sometimes able to hold an item with no itemHeldEvent!
@@ -71,6 +72,7 @@ import java.net.URLDecoder;
 import java.util.zip.*;
 
 import org.bukkit.block.Block;
+import org.bukkit.block.data.BlockData;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.Dispenser;
 import org.bukkit.Bukkit;
@@ -155,6 +157,10 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		
 		int enchants = 0;
 		ItemStack item = event.getItem();
+		if (isProtectedByLore (item)) { 
+			enchants = 1; // to ensure that a protected item with none gets none added
+			limitMultiples = true;
+		}
 		
 		// Get List of disallowed enchants for that item and for ALL items
 		Map<Enchantment, Integer> disallowedEnchants = getDisallowedTableEnchants (item.getType(), player);
@@ -221,7 +227,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					event.setExpLevelCost (event.getExpLevelCost() - returnedXP);
 				//event.getEnchantsToAdd().remove (ench);
 				item.removeEnchantment (ench); // just to be sure!
-				//* DEBUG */log.info ("Removed " + ench.getName() + "-" + level + ", now: " + event.getEnchantsToAdd());
+				/* DEBUG */log.info ("Removed " + ench.getName() + "-" + level + ", now: " + event.getEnchantsToAdd());
 
 				if (getConfig().getBoolean ("Message on limit", true))
 					player.sendMessage (language.get (player, "limited3", 
@@ -348,10 +354,24 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				slot0.getType() == result.getType() );
 	}
 		
+	private boolean isProtectedByLore (ItemStack item) {
+		String trigger = getConfig().getString ("Lore immutable string");
+		
+		if (trigger != null && item != null && item.hasItemMeta() && item.getItemMeta().hasLore()) {
+			for (String lore : item.getItemMeta().getLore()) {
+				lore.toLowerCase();
+				if (lore.contains (trigger))
+					return true;
+			}
+		}
+		return false;
+	}
 
 	// Is set with ClickEvent, when placing in crafting slot of an anvil.
 	private static Map <UUID, Integer> prevXP = new HashMap<UUID, Integer>();
-	private static Map <UUID, Byte> prevAnvilData = new HashMap<UUID, Byte>();
+// 1.12	private static Map <UUID, Byte> prevAnvilData = new HashMap<UUID, Byte>();
+	private static Map <UUID, BlockData> prevAnvilData = new HashMap<UUID, BlockData>();
+	
 
 	@EventHandler (ignoreCancelled = true) 
 	void closeAnvilMonitor (InventoryCloseEvent event) {
@@ -522,9 +542,9 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			// New feature: infinite anvil
 			if (getConfig().getBoolean ("Infinite anvils") && iType == InventoryType.ANVIL) {
 				Block anvilBlock = player.getTargetBlock((Set<Material>)null, 6);
-				if (anvilBlock != null && anvilBlock.getType() == Material.ANVIL) {	
+				if (isDamagedAnvil (anvilBlock)) {
 					//log.info ("Current anvil data: " + anvilBlock.getData());			
-					anvilBlock.setData ((byte)(anvilBlock.getData () & 0x03));  // 0=undamaged; bits 0-1 are compass orientation on Block
+					repairAnvil (anvilBlock);
 				} else
 					log.warning ("Cannot find anvil to repair");
 			}			
@@ -543,8 +563,9 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				log.info ("Allowing rename of illegal item");
 				return; //  allow if renamed item has illegal enchant.
 			}
+			boolean loreSafe = isProtectedByLore (slot0);
 											
-			if (stopThisRepair || hasIllegalAnvilEnchant (result, player))
+			if (loreSafe || stopThisRepair || hasIllegalAnvilEnchant (result, player))
 			{
 				switch (action) {
 					case DROP_ALL_SLOT:
@@ -568,7 +589,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				final int playerXP = (ti != null? ti : player.getLevel());
 				final PlayerInventory pinv = player.getInventory();
 				final ItemStack crafted = result;
-				final boolean doDowngrade = stopThisRepair ? false : getConfig ().getBoolean ("Downgrade in anvil");
+				final boolean doDowngrade = stopThisRepair || loreSafe ? false : getConfig ().getBoolean ("Downgrade in anvil");
 				// Add null check for item naming
 				
 				if (!doDowngrade) { // going to stop the result taking and put ingredients back
@@ -583,10 +604,11 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					// Repair anvil before it is destroyed and can't return item in runLater task
 					if (iType == InventoryType.ANVIL) {
 						Block anvilBlock = player.getTargetBlock((Set<Material>)null, 6);
-						if (anvilBlock != null && anvilBlock.getType() == Material.ANVIL) {
-							Byte pData = prevAnvilData.get (player.getUniqueId());
+						if (isDamagedAnvil (anvilBlock)) {
+							//1.12 Byte pData = prevAnvilData.get (player.getUniqueId());
+							BlockData pData = prevAnvilData.get (player.getUniqueId());
 							if (pData != null) {
-								anvilBlock.setData (pData);
+								anvilBlock.setBlockData (pData); // 1.12 setData
 								// log.info ("restored anvil data to " + pData);
 							} else
 								log.warning ("Don't have stored anvil repair state to restore");
@@ -708,6 +730,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					(new anvilUndoer()).runTask(this);				
 			}
 		}
+		/* Try to stop an attempt at illegal enchant w/book on anvil */
 		else if (inv.getType()== InventoryType.ANVIL && event.getSlotType() == SlotType.CRAFTING) {
 			ItemStack[] anvilContents = inv.getContents();
 			ItemStack slot0 = anvilContents[0];
@@ -726,7 +749,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				prevXP.put (player.getUniqueId(), curXP);
 				Block anvil = player.getTargetBlock ((Set<Material>)null,6);
 				if (anvil != null && anvil.getType() == Material.ANVIL)
-					prevAnvilData.put (player.getUniqueId(), anvil.getData());
+					prevAnvilData.put (player.getUniqueId(), anvil.getBlockData()); // 1.12 getData()
 				//*DEBUG*/ log.info ("saved XP at " + curXP);
 				
 				// log.info ("Placed a " + event.getCursor() + " in slot " + event.getRawSlot());
@@ -771,7 +794,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		if (book != null && tool != null && isPlace)
 		{ 
 			Map<Enchantment, Integer> disallowedEnchants = getDisallowedAnvilEnchants (tool.getType(), player);
-			boolean disallowed = false;
+			boolean disallowed = isProtectedByLore (tool);  // normally false, but…
 			boolean bookPlusBook = (book.getType() == Material.ENCHANTED_BOOK && tool.getType() == Material.ENCHANTED_BOOK);
 			ArrayList<Enchantment> violators = new ArrayList<Enchantment>();
 				
@@ -911,6 +934,25 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				}
 			}
 		}
+	}
+	boolean isDamagedAnvil (Block b) {
+		if (b == null) return false;
+		
+		switch (b.getType()) {
+			case ANVIL: return false; // only true for 1.13
+			case CHIPPED_ANVIL:
+			case DAMAGED_ANVIL:
+				return true;
+		}		
+		return false;
+	}
+	void repairAnvil (Block b) {
+		if (b == null) return;
+		
+		/* 1.12 and earlier code **
+		anvilBlock.setData ((byte)(anvilBlock.getData () & 0x03));  // 0=undamaged; bits 0-1 are compass orientation on Block
+		 */
+		b.setType (Material.ANVIL);
 	}
 
 	
@@ -1369,7 +1411,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				try {
 					final int offset = new String ("UNKNOWN_ENCHANT_").length();
 					int enchID = Integer.parseInt (enchantString.substring (offset));
-					enchant = Enchantment.getById (enchID);
+					// 1.13 enchant = Enchantment.getById (enchID);
 				} catch (Exception ex) {
 					enchant = null;
 				}					

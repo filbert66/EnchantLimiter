@@ -1,4 +1,4 @@
 
 # javac -classpath ../../../../../../../minecraft-server/MC_Server/CraftBukkit.jar *.java
 # javac -Xlint:unchecked -Xlint:-deprecation -classpath ~/Dropbox/minecraft_code/AntiCreeper/bin/Anticreeper.jar:../../../../../../../../minecraft-server/craftbukkit-1.7.2-R0.3.jar:../../../../../../../../minecraft-server/MC_Server/plugins/LanguageAPI.jar *.java
-javac -Xlint:unchecked -Xlint:-deprecation -classpath ~/Dropbox/minecraft_code/AntiFire/bin/AntiFire.jar:../../../../../../../../spigot/server/spigot.jar:../../../../../../../../spigot/server/plugins/LanguageAPI-v0.2.jar *.java
+javac -Xlint:unchecked -Xlint:deprecation -classpath ~/Dropbox/minecraft_code/AntiFire/bin/AntiFire.jar:../../../../../../../../spigot/server/spigot.jar:../../../../../../../../spigot/server/plugins/LanguageAPI-v0.2.jar *.java
