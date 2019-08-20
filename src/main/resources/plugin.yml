@@ -4,16 +4,19 @@
 # 13 Jul 2014 : PSW :  Added enchlimiter.repairs and 'el set' syntax
 # 30 Jul 2014 : PSW :  Added hold,elfix.
 # 18 Aug 2014 : PSW :  Removed repairs.downgrade; added enchlimiter.useillegal.
+# 14 Aug 2019 : PSW : Added api-version: 1.13
 
 name: EnchLimiter
 main: com.yahoo.phil_work.enchlimiter.EnchLimiter
-version: 2.8
+version: 3.1
 author: filbert66
 description: Limits enchants by multiples or configured list
 website: dev.bukkit.org/bukkit-plugins/enchlimiter
 softdepend: [LanguagesAPI, Unbreakable]
 # These plugins have not updated their MaterialCategory with getRawMaterial()
 loadbefore: [Thor]
+api-version: 1.13
+
 
 permissions:
   enchlimiter.*:

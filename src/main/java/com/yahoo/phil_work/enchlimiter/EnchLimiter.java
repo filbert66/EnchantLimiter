@@ -44,12 +44,17 @@
  *  19 May 2018 : Squash "Cannot find armor to fix" when non-shield in shield slot.
  *  02 Jun 2018 : Fix bug with books on enchant tables.
  *  15 Mar 2019 : Add lore-specific protection
+ *********
+ *  09 Aug 2019 : Recode for 1.13, 1.14 API set.
+ * 
+ *   
  *
  * Bukkit BUG: Sometimes able to place items in Anvil & do restricted enchant; no ItemClickEvent!
  * Bukkit BUG: Sometimes able to hold an item with no itemHeldEvent!
  * 
  * TODO: 
  *   commands for modifying 'Disallowed enchants'
+     replace bit.ly/EnchMat with https://dev.bukkit.org/projects/ench-limiter/pages/supported-materials
  *   
  */
 
@@ -73,17 +78,18 @@ import java.util.zip.*;
 
 import org.bukkit.block.Block;
 import org.bukkit.block.data.BlockData;
+import  org.bukkit.block.data.Directional;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.Dispenser;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
-import org.bukkit.DyeColor;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.inventory.*;
 import org.bukkit.inventory.meta.EnchantmentStorageMeta;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.inventory.meta.Damageable;
 import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Entity;
@@ -102,13 +108,13 @@ import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryMoveItemEvent;
 import org.bukkit.event.inventory.PrepareItemCraftEvent;
 import org.bukkit.event.inventory.InventoryType.SlotType;
-import org.bukkit.event.player.PlayerPickupItemEvent;
+import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.player.PlayerItemHeldEvent;
 import org.bukkit.Location;
 import org.bukkit.Material;
-import org.bukkit.material.MaterialData;
-import org.bukkit.material.Dye;
-import org.bukkit.material.DirectionalContainer;
+//import org.bukkit.material.MaterialData;
+//import org.bukkit.material.Dye;
+// import org.bukkit.material.DirectionalContainer;
 import org.bukkit.plugin.*;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.plugin.PluginLogger;
@@ -144,6 +150,15 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		}	
 	}
 
+	String enchantName (Enchantment e) {
+		String n = (e != null ? e.getKey().toString() : null);
+		if (n != null && n.startsWith ("minecraft:")) {
+			n = n.substring (10);
+			n = n.substring(0, 1).toUpperCase() + n.substring(1).toLowerCase();  //capitalize
+		}
+		return n;
+	}
+	
 	// Now in 1.8, Levels used is a fixed 1-3, so don't return any if just limitMultiples since they still get at least one.
 	//  If disallowed enchants reduces a L3 1/3rd, should charge only two, but Bukkit doesn't give a way to do that with 
 	//    the event, so have to manually reset the level on returning.
@@ -215,7 +230,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 
 					if (getConfig().getBoolean ("Message on disallowed", true))
 						player.sendMessage (language.get (player, "disallowed3", 
-											chatName + " removed disallowed {0}-{1} from {2}", ench.getName(), level, item.getType() ));
+											chatName + " removed disallowed {0}-{1} from {2}", enchantName(ench), level, item.getType() ));
 				}
 				else {
 					enchants++;
@@ -227,11 +242,11 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					event.setExpLevelCost (event.getExpLevelCost() - returnedXP);
 				//event.getEnchantsToAdd().remove (ench);
 				item.removeEnchantment (ench); // just to be sure!
-				/* DEBUG */log.info ("Removed " + ench.getName() + "-" + level + ", now: " + event.getEnchantsToAdd());
+				/* DEBUG */log.info ("Removed " + enchantName(ench) + "-" + level + ", now: " + event.getEnchantsToAdd());
 
 				if (getConfig().getBoolean ("Message on limit", true))
 					player.sendMessage (language.get (player, "limited3", 
-										chatName + " removed multiple {0}-{1}", ench.getName(), level));
+										chatName + " removed multiple {0}-{1}", enchantName(ench), level));
 			}
 		} 
 
@@ -310,15 +325,12 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 						if (iInventory.getSecondary() != null) {
 							lapis = iInventory.getSecondary().clone();
 						} else { // there is always at least one
-							Dye LMD = new Dye (DyeColor.BLUE);
-							// call without deprecated use of byte data not working; trying that then. Works!
-							lapis = new ItemStack (LMD.getItemType(), 0, (short)0, LMD.getData()); // stack of 0 items for now
-							lapis.setData (LMD);
+							lapis = new ItemStack (Material.LAPIS_LAZULI, 0); // stack of 0 items for now
 						}
 						lapis.setAmount (lapis.getAmount() + returnedLevels);
 						//*DEBUG*/ log.info ("lapis data is " + lapis.getData());
 						iInventory.setSecondary (lapis); 
-						iInventory.getSecondary ().setData (lapis.getData()); // above call doesn't seem to setData
+						// iInventory.getSecondary ().setData (lapis.getData()); // above call doesn't seem to setData
 						//*DEBUG*/ log.info ("Inventory lapis data is " + iInventory.getSecondary().getData());
 
 						player.giveExpLevels (returnedLevels);	
@@ -336,9 +348,11 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 	boolean isRepair (final ItemStack slot0, final ItemStack slot1) {
 		if (slot0 == null || slot1 == null)
 			return false;
-			
+		ItemMeta meta = slot0.getItemMeta();
+		if (! (meta instanceof Damageable)) return false; // nothing to do
+				
 		// Repair with same item type, first needs repair, second item with no enchants.		
-		if (slot0.getType() == slot1.getType() && slot0.getDurability() > 0 && !slot1.getItemMeta().hasEnchants())
+		if (slot0.getType() == slot1.getType() && ((Damageable) meta).hasDamage() && !slot1.getItemMeta().hasEnchants())
 			return true;
 			
 		// Repair with raw elements in second slot
@@ -355,7 +369,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 	}
 		
 	private boolean isProtectedByLore (ItemStack item) {
-		String trigger = getConfig().getString ("Lore immutable string");
+		String trigger = getConfig().getString ("Lore immutable string").toLowerCase();
 		
 		if (trigger != null && item != null && item.hasItemMeta() && item.getItemMeta().hasLore()) {
 			for (String lore : item.getItemMeta().getLore()) {
@@ -542,7 +556,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			// New feature: infinite anvil
 			if (getConfig().getBoolean ("Infinite anvils") && iType == InventoryType.ANVIL) {
 				Block anvilBlock = player.getTargetBlock((Set<Material>)null, 6);
-				if (isDamagedAnvil (anvilBlock)) {
+				if (isAnvil (anvilBlock)) {
 					//log.info ("Current anvil data: " + anvilBlock.getData());			
 					repairAnvil (anvilBlock);
 				} else
@@ -604,7 +618,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					// Repair anvil before it is destroyed and can't return item in runLater task
 					if (iType == InventoryType.ANVIL) {
 						Block anvilBlock = player.getTargetBlock((Set<Material>)null, 6);
-						if (isDamagedAnvil (anvilBlock)) {
+						if (isAnvil (anvilBlock)) {
 							//1.12 Byte pData = prevAnvilData.get (player.getUniqueId());
 							BlockData pData = prevAnvilData.get (player.getUniqueId());
 							if (pData != null) {
@@ -748,7 +762,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				Integer curXP = player.getLevel();	// need to get/set levels, not XP (progress to next)
 				prevXP.put (player.getUniqueId(), curXP);
 				Block anvil = player.getTargetBlock ((Set<Material>)null,6);
-				if (anvil != null && anvil.getType() == Material.ANVIL)
+				if (anvil != null && isAnvil (anvil))
 					prevAnvilData.put (player.getUniqueId(), anvil.getBlockData()); // 1.12 getData()
 				//*DEBUG*/ log.info ("saved XP at " + curXP);
 				
@@ -798,9 +812,9 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			boolean bookPlusBook = (book.getType() == Material.ENCHANTED_BOOK && tool.getType() == Material.ENCHANTED_BOOK);
 			ArrayList<Enchantment> violators = new ArrayList<Enchantment>();
 				
-			ItemMeta meta = book.getItemMeta();
-			if ( !(meta instanceof EnchantmentStorageMeta)) {
-				if (tool.getType() == book.getType() && tool.getDurability() == 0 && book.getDurability() == 0) {
+			ItemMeta bookMeta = book.getItemMeta();
+			if ( !(bookMeta instanceof EnchantmentStorageMeta)) {
+				if (tool.getType() == book.getType() && bookMeta instanceof Damageable) {
 					// log.info ("Enchant combo attempt of " + tool.getType());
 					for (Enchantment e: book.getEnchantments().keySet()) {
 						if (disallowedEnchants.containsKey (e)) {
@@ -815,7 +829,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					}
 				}	
 			} else {
-				EnchantmentStorageMeta bookStore = (EnchantmentStorageMeta)meta;
+				EnchantmentStorageMeta bookStore = (EnchantmentStorageMeta)bookMeta;
 				int newEnchants = 0;
 				final int maxEnchants = getConfig().getInt ("Max Enchants Allowed", 1);
 				
@@ -924,9 +938,9 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 						for (Enchantment e : violators) {
 							int level = disallowedEnchants.get (e);
 							if (level == 1)								
-								player.sendMessage (language.get (player, "removeWarn", chatName + ": {0} will be removed", e.getName()));
+								player.sendMessage (language.get (player, "removeWarn", chatName + ": {0} will be removed", enchantName(e)));
 							else 
-								player.sendMessage (language.get (player, "reduceWarn", chatName + ": {0} will be reduced to {1}", e.getName(), level));
+								player.sendMessage (language.get (player, "reduceWarn", chatName + ": {0} will be reduced to {1}", enchantName(e), level));
 						}
 						player.sendMessage (language.get (player, "anvilWarn", chatName + ": Some enchants will be limited/removed; see above"));
 					} else					 
@@ -935,11 +949,11 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			}
 		}
 	}
-	boolean isDamagedAnvil (Block b) {
+	boolean isAnvil (Block b) {
 		if (b == null) return false;
 		
 		switch (b.getType()) {
-			case ANVIL: return false; // only true for 1.13
+			case ANVIL:   // only tru for 1.13+
 			case CHIPPED_ANVIL:
 			case DAMAGED_ANVIL:
 				return true;
@@ -966,8 +980,10 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 	static Map <UUID, Long> lastMsg = new HashMap<UUID, Long>();
 	
 	@EventHandler (ignoreCancelled = true)
-	void pickupMonitor (PlayerPickupItemEvent event) {
-		Player player = event.getPlayer();
+	void pickupMonitor (EntityPickupItemEvent event) {
+		if (! (event.getEntity() instanceof Player)) return;
+		
+		Player player = (Player)event.getEntity();
 		ItemStack item = event.getItem().getItemStack();
 
 		if ( !getConfig().getBoolean ("Stop pickup") && player.hasPermission ("enchlimiter.useillegal"))
@@ -1035,13 +1051,17 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			log.warning ("BlockDispenseEvent from a non-dispenser " + b);
 			return;
 		}
-		// Bukkit bug: DirectionalContainer does not support UP/DOWN
-		BlockFace facing = new DirectionalContainer (b.getType(), (byte)(b.getData() & 0x7)).getFacing();
-		if ((b.getData() & 0x7) == 0)
-			facing = BlockFace.DOWN;
-		else if ((b.getData() & 0x7) == 1)
-			facing = BlockFace.UP;
-		loc.add (facing.getModX(), facing.getModY(), facing.getModZ());
+		// we know that it's a facing Dispenser or Dropper, but Dropper doesn't inherit Directional, so to be sure:
+		BlockData bd = b.getBlockData();
+		if (bd instanceof Directional) {
+			BlockFace facing = ((Directional)bd).getFacing();
+	/*		if ((b.getData() & 0x7) == 0)
+				facing = BlockFace.DOWN;
+			else if ((b.getData() & 0x7) == 1)
+				facing = BlockFace.UP; 
+	***/
+			loc.add (facing.getModX(), facing.getModY(), facing.getModZ());
+		}
 		// log.info ("Checking " + facing + " (data " + b.getData() + ") location " + loc);
 		for (Entity e: loc.getChunk().getEntities()) {
 			if (loc.equals (e.getLocation().getBlock().getLocation())) { // within range
@@ -1237,7 +1257,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					
 					if (getConfig().getBoolean ("Message on disallowed", true) && p != null)
 						p.sendMessage (language.get (p, "disallowed3", 
-									   chatName + " removed disallowed {0}-{1} from {2}", ench.getName(), level, item.getType() ));
+									   chatName + " removed disallowed {0}-{1} from {2}", enchantName(ench), level, item.getType() ));
 				}
 				else {
 					enchants++;
@@ -1254,7 +1274,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 
 				if (getConfig().getBoolean ("Message on limit", true) && p != null)
 					p.sendMessage (language.get (p, "limited3", 
-									chatName + " removed multiple {0}-{1} from {2}", ench.getName(), level, item.getType() ));
+									chatName + " removed multiple {0}-{1} from {2}", enchantName(ench), level, item.getType() ));
 			}
 		} 		
 		return modified;
@@ -1301,7 +1321,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					
 					if (getConfig().getBoolean ("Message on disallowed", true) && p != null)
 						p.sendMessage (language.get (p, "disallowed3", 
-									   chatName + " removed disallowed {0}-{1} from {2}", ench.getName(), level, item.getType() ));
+									   chatName + " removed disallowed {0}-{1} from {2}", enchantName(ench), level, item.getType() ));
 				}
 				else {
 					enchants++;
@@ -1318,7 +1338,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 
 				if (getConfig().getBoolean ("Message on limit", true) && p != null)
 					p.sendMessage (language.get (p, "limited3", 
-									chatName + " removed multiple {0}-{1} from {2}", ench.getName(), level, item.getType() ));
+									chatName + " removed multiple {0}-{1} from {2}", enchantName(ench), level, item.getType() ));
 			}
 		} 
 		if (modified)
@@ -1417,10 +1437,19 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				}					
 			}
 			else {
-				enchant = Enchantment.getByName (enchantString);
+				for (Enchantment e : Enchantment.values()) {
+					if (e.toString().contains (enchantString)) { // can't call getByName. Check names match and fix 	below bitly
+						enchant = e;
+						// log.info ("Found match in " + e.toString() + " to '" + enchantString + "'");
+						break;
+					}
+					else {
+					//	log.info ("No match in " + e.toString() + " to '" + enchantString);
+					}
+				}	
 			}
 			if (enchant == null && !enchantString.equals ("ALL")) 
-				log.warning (cs.getCurrentPath()+"." +matString + ": Unknown enchantment '" + enchantString+ "'. Refer to http://bit.ly/EnchLimit");
+				log.warning (cs.getCurrentPath()+"." +matString + ": Unknown enchantment '" + enchantString+ "'. Refer to http://bit.ly/EnchLimitNames");
 			else
 				results.put (enchant, level);
 		}	
@@ -1527,6 +1556,15 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 
 		return results;
 	}  	
+	private String enchMapToString (Map<Enchantment, Integer> enchMap) {
+		String s = "";
+		for (Enchantment e: enchMap.keySet ()) {
+			s += enchantName (e) + "-" + enchMap.get(e).toString() + ", ";
+		}
+		if (s != null && s.length() > 0)  // omit trailing comma-space
+			s = s.substring (0, s.length() -2);
+		return s;
+	}
 	
 	private int getTotalEnchantLevels (final ItemStack item) {
 		int total = 0;
@@ -1565,7 +1603,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		for (String itemString : cs.getKeys (false /*depth*/)) {
 			Material m = Material.matchMaterial (itemString);
 			if (itemString.equals("ALL") || itemString.startsWith ("ALL_ARMOR") || itemString.equals ("ALL_BARDING") || (itemString.startsWith ("ALL_") && itemString.endsWith ("S"))) {
-				log.config (cs.getCurrentPath() +"."+ itemString + ":" + getDisallowedEnchants (cs, itemString));	
+				log.config (cs.getCurrentPath() +"."+ itemString + ":" + enchMapToString (getDisallowedEnchants (cs, itemString)));	
 				continue;
 			} else if (m == null && itemString.startsWith ("Group_")) {
 				// remember for later searching
@@ -1591,7 +1629,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			else if (m.isBlock())
 				log.warning (cs.getCurrentPath() + ":Do not support blocks in disallowed enchants: " + m);
 			else {
-				log.config (cs.getCurrentPath() +"." + itemString + ":" + getDisallowedEnchants (cs, m, null));
+				log.config (cs.getCurrentPath() +"." + itemString + ":" + enchMapToString (getDisallowedEnchants (cs, m, null)));
 			}
 		}
 	}		

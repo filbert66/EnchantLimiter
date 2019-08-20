@@ -51,7 +51,7 @@ public class EnchLimiterFixCommand implements CommandExecutor {
 		}
 		Player p = (Player)sender;
 		if (args.length == 0) {
-			ItemStack item = p.getItemInHand();
+			ItemStack item = p.getInventory().getItemInMainHand();
 			if (item == null || item.getType() == Material.AIR)
 				return false;
 			if ( !plugin.fixItem (item, p))
