@@ -46,6 +46,7 @@
  *  15 Mar 2019 : Add lore-specific protection
  *********
  *  09 Aug 2019 : Recode for 1.13, 1.14 API set.
+ *  31 Aug 2019 : Bug in isProtectedByLore if no lore
  * 
  *   
  *
@@ -369,9 +370,13 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 	}
 		
 	private boolean isProtectedByLore (ItemStack item) {
-		String trigger = getConfig().getString ("Lore immutable string").toLowerCase();
+		String trigger = getConfig().getString ("Lore immutable string");
+		if (trigger == null) 
+			return false;
+		else
+			trigger = trigger.toLowerCase();
 		
-		if (trigger != null && item != null && item.hasItemMeta() && item.getItemMeta().hasLore()) {
+		if (item != null && item.hasItemMeta() && item.getItemMeta().hasLore()) {
 			for (String lore : item.getItemMeta().getLore()) {
 				lore.toLowerCase();
 				if (lore.contains (trigger))
@@ -988,6 +993,8 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 
 		if ( !getConfig().getBoolean ("Stop pickup") && player.hasPermission ("enchlimiter.useillegal"))
 			return;
+		if (isProtectedByLore (item))
+			return;
 			
 		if (fixOrTestItem (item, player, /* testOnly=*/ getConfig().getBoolean ("Stop pickup"))) {
 			if (getConfig().getBoolean ("Stop pickup")) {
@@ -1014,7 +1021,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 
 		if (item == null)
 			return;
-		else if (getConfig().getBoolean ("Fix held items"))		
+		else if (getConfig().getBoolean ("Fix held items") && !isProtectedByLore (item))		
 			fixItem (item, p);
 		else if (! p.hasPermission ("enchlimiter.useillegal"))
 		{ 
