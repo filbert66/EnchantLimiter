@@ -47,6 +47,7 @@
  *********
  *  09 Aug 2019 : Recode for 1.13, 1.14 API set.
  *  31 Aug 2019 : Bug in isProtectedByLore if no lore
+ *  25 Jun 2020 : Fix EnchMat bitly, and test for 1.15/16. Commented out Debug msgs.
  * 
  *   
  *
@@ -55,7 +56,6 @@
  * 
  * TODO: 
  *   commands for modifying 'Disallowed enchants'
-     replace bit.ly/EnchMat with https://dev.bukkit.org/projects/ench-limiter/pages/supported-materials
  *   
  */
 
@@ -157,6 +157,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			n = n.substring (10);
 			n = n.substring(0, 1).toUpperCase() + n.substring(1).toLowerCase();  //capitalize
 		}
+		//*DEBUG*/ n= (e != null ? e.toString() : null);
 		return n;
 	}
 	
@@ -243,7 +244,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 					event.setExpLevelCost (event.getExpLevelCost() - returnedXP);
 				//event.getEnchantsToAdd().remove (ench);
 				item.removeEnchantment (ench); // just to be sure!
-				/* DEBUG */log.info ("Removed " + enchantName(ench) + "-" + level + ", now: " + event.getEnchantsToAdd());
+				//* DEBUG */log.info ("Removed " + enchantName(ench) + "-" + level + ", now: " + event.getEnchantsToAdd());
 
 				if (getConfig().getBoolean ("Message on limit", true))
 					player.sendMessage (language.get (player, "limited3", 
@@ -547,7 +548,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		 */
 		final InventoryType iType = inv.getType();
 		if ((iType == InventoryType.ANVIL || iType==InventoryType.MERCHANT) && event.getSlotType() == SlotType.RESULT) {
-			// log.info ("Looks like you " + action + " " + event.getSlotType() + " " + event.getCurrentItem() + " with " + event.getCursor() + " on cursor");
+			/*DEBUG*/ log.info ("Looks like you " + action + " " + event.getSlotType() + " " + event.getCurrentItem() + " with " + event.getCursor() + " on cursor");
 			ItemStack[] anvilContents = inv.getContents();
 			final ItemStack slot0 = anvilContents[0];
 			final ItemStack slot1 = anvilContents[1];
@@ -748,6 +749,8 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				if (player != null)
 					(new anvilUndoer()).runTask(this);				
 			}
+			else 
+				/*DEBUG*/ log.info ("No illegal anvil enchant on result: " + result);
 		}
 		/* Try to stop an attempt at illegal enchant w/book on anvil */
 		else if (inv.getType()== InventoryType.ANVIL && event.getSlotType() == SlotType.CRAFTING) {
@@ -820,7 +823,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			ItemMeta bookMeta = book.getItemMeta();
 			if ( !(bookMeta instanceof EnchantmentStorageMeta)) {
 				if (tool.getType() == book.getType() && bookMeta instanceof Damageable) {
-					// log.info ("Enchant combo attempt of " + tool.getType());
+					//*DEBUG*/ log.info ("Enchant combo attempt of " + tool.getType());
 					for (Enchantment e: book.getEnchantments().keySet()) {
 						if (disallowedEnchants.containsKey (e)) {
 							if (disallowedEnchants.get(e) <= book.getEnchantmentLevel(e) ) {
@@ -1129,7 +1132,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 
 		ItemMeta meta = item.getItemMeta();
 		if ( meta instanceof EnchantmentStorageMeta) {
-			if ( !((EnchantmentStorageMeta)meta).hasStoredEnchants())
+			if ( !(((EnchantmentStorageMeta)meta).hasStoredEnchants()))
 				return false; // nothing to do
 			else
 			  	return fixOrTestBook (disallowedEnchants, item, p, true); // testonly
@@ -1293,7 +1296,9 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		if (item.getType() != Material.ENCHANTED_BOOK) {
 			log.warning ("fixOrTestBook called with " + item.getType());
 			return false;
-		}		
+		}	
+		/*DEBUG*/log.info ("fixOrTestBook() if " + item + " has " + enchMapToString (disallowedEnchants));
+			
 		boolean limitMultiples = getConfig().getBoolean ("Limit Multiples", true) && 
 			(p == null || ! p.hasPermission ("enchlimiter.multiple"));
 		
@@ -1632,7 +1637,7 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 			}
 			
 			if (m == null)
-				log.warning (cs.getCurrentPath() + ":Unknown item: " + itemString + ". Refer to http://bit.ly/EnchMat");
+				log.warning (cs.getCurrentPath() + ":Unknown item: " + itemString + ". Refer to https://bit.ly/EnchLimitMat");
 			else if (m.isBlock())
 				log.warning (cs.getCurrentPath() + ":Do not support blocks in disallowed enchants: " + m);
 			else {
