@@ -1,14 +1,12 @@
-package com.yahoo.phil_work;
+package com.yahoo.phil_work.enchlimiter.util;
 
-import me.xhawk87.LanguageAPI.ISOCode;
-import me.xhawk87.LanguageAPI.PluginLanguageLibrary;
+
 import org.bukkit.Bukkit;
 import org.bukkit.command.CommandSender;
 import org.bukkit.plugin.Plugin;
 import java.io.File;
 import java.io.FileInputStream;
 import java.net.URL;
-import java.net.URLDecoder;
 import java.util.logging.Logger;
 import java.util.zip.*;
 
@@ -40,7 +38,7 @@ public class LanguageWrapper {
     public LanguageWrapper(Plugin plugin, String code) {
         this.plugin = plugin;
         if (Bukkit.getPluginManager().getPlugin("LanguageAPI") != null) {
-            langObj = new PluginLanguageLibrary(plugin, ISOCode.findMatch(code));
+            //langObj = new PluginLanguageLibrary(plugin, ISOCode.findMatch(code));
         }
     }
     
@@ -96,12 +94,13 @@ public class LanguageWrapper {
      * @return The formatted string
      */
     public String get(CommandSender forWhom, String key, String template, Object... params) {
-        if (langObj != null) {
+        /*if (langObj != null) {
             PluginLanguageLibrary language = (PluginLanguageLibrary) langObj;
             return language.get(forWhom, key, template, params);
         } else {
             return compile(template, params);
-        }
+        }*/
+        return compile(template, params);
     }
 
     /**
@@ -114,7 +113,7 @@ public class LanguageWrapper {
      * @param template The default template for the plugin
      * @param params The parameters to be inserted
      * @return The formatted string
-     */
+
     public String get(ISOCode preferredLocale, String key, String template, Object... params) {
         if (langObj != null) {
             PluginLanguageLibrary language = (PluginLanguageLibrary) langObj;
@@ -122,7 +121,10 @@ public class LanguageWrapper {
         } else {
             return compile(template, params);
         }
+
+        return compile(template, params);
     }
+    */
 
     /**
      * Taken directly from the PluginLanguageLibrary class of the LanguageAPI

@@ -61,11 +61,10 @@
 
 package com.yahoo.phil_work.enchlimiter;
 
-import com.yahoo.phil_work.LanguageWrapper;
-import com.yahoo.phil_work.MaterialCategory;
+import com.yahoo.phil_work.enchlimiter.util.LanguageWrapper;
+import com.yahoo.phil_work.enchlimiter.util.MaterialCategory;
 
 import java.io.File;
-import java.util.Collections;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Set;
@@ -74,19 +73,15 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.io.FileInputStream;
-import java.net.URLDecoder;
 import java.util.zip.*;
 
+import org.bukkit.*;
 import org.bukkit.block.Block;
 import org.bukkit.block.data.BlockData;
 import  org.bukkit.block.data.Directional;
 import org.bukkit.block.BlockFace;
-import org.bukkit.block.Dispenser;
-import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
-import org.bukkit.command.Command;
-import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.enchantments.EnchantmentWrapper;
 import org.bukkit.inventory.*;
 import org.bukkit.inventory.meta.EnchantmentStorageMeta;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -94,7 +89,6 @@ import org.bukkit.inventory.meta.Damageable;
 import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Entity;
-import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.HumanEntity;
 import org.bukkit.event.block.BlockDispenseEvent;
@@ -106,23 +100,15 @@ import org.bukkit.event.entity.ItemSpawnEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
-import org.bukkit.event.inventory.InventoryMoveItemEvent;
-import org.bukkit.event.inventory.PrepareItemCraftEvent;
 import org.bukkit.event.inventory.InventoryType.SlotType;
 import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.player.PlayerItemHeldEvent;
-import org.bukkit.Location;
-import org.bukkit.Material;
 //import org.bukkit.material.MaterialData;
 //import org.bukkit.material.Dye;
 // import org.bukkit.material.DirectionalContainer;
 import org.bukkit.plugin.*;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.plugin.PluginLogger;
 import org.bukkit.scheduler.BukkitRunnable;
-
-import com.yahoo.phil_work.enchlimiter.EnchLimiterCommandExecutor;
-import com.yahoo.phil_work.enchlimiter.EnchLimiterFixCommand;
 
 public class EnchLimiter extends JavaPlugin implements Listener {
 	public Logger log;
@@ -1449,16 +1435,16 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 				}					
 			}
 			else {
-				for (Enchantment e : Enchantment.values()) {
-					if (e.toString().contains (enchantString)) { // can't call getByName. Check names match and fix 	below bitly
-						enchant = e;
-						// log.info ("Found match in " + e.toString() + " to '" + enchantString + "'");
-						break;
-					}
-					else {
-					//	log.info ("No match in " + e.toString() + " to '" + enchantString);
-					}
-				}	
+
+				try {
+					NamespacedKey namespacedKey = NamespacedKey.minecraft(convertLegacy(enchantString.toLowerCase()));
+					Enchantment enchantment = Registry.ENCHANTMENT.get(namespacedKey);
+					if (enchantment != null)
+						enchant = enchantment;
+				}catch (Exception e){
+					log.warning (cs.getCurrentPath()+"." +matString + ": Unknown enchantment '" + enchantString+ "'. Refer to http://bit.ly/EnchLimitNames");
+				}
+
 			}
 			if (enchant == null && !enchantString.equals ("ALL")) 
 				log.warning (cs.getCurrentPath()+"." +matString + ": Unknown enchantment '" + enchantString+ "'. Refer to http://bit.ly/EnchLimitNames");
@@ -1683,5 +1669,57 @@ public class EnchLimiter extends JavaPlugin implements Listener {
 		if (Global_Groups != null) Global_Groups.clear();
 		if (Table_Groups != null) Table_Groups.clear();
 		if (Anvil_Groups != null) Anvil_Groups.clear();
+	}
+
+
+	private static String convertLegacy(String from) {
+		if (from == null) {
+			return null;
+		} else {
+			switch (from.toLowerCase()) {
+				case "protection_environmental":
+					return "protection";
+				case "protection_fire":
+					return "fire_protection";
+				case "protection_fall":
+					return "feather_falling";
+				case "protection_explosions":
+					return "blast_protection";
+				case "protection_projectile":
+					return "projectile_protection";
+				case "oxygen":
+					return "respiration";
+				case "water_worker":
+					return "aqua_affinity";
+				case "damage_all":
+					return "sharpness";
+				case "damage_undead":
+					return "smite";
+				case "damage_arthropods":
+					return "bane_of_arthropods";
+				case "loot_bonus_mobs":
+					return "looting";
+				case "sweeping_edge":
+					return "sweeping";
+				case "dig_speed":
+					return "efficiency";
+				case "durability":
+					return "unbreaking";
+				case "loot_bonus_blocks":
+					return "fortune";
+				case "arrow_damage":
+					return "power";
+				case "arrow_knockback":
+					return "punch";
+				case "arrow_fire":
+					return "flame";
+				case "arrow_infinite":
+					return "infinity";
+				case "luck":
+					return "luck_of_the_sea";
+				default:
+					return from;
+			}
+		}
 	}
 }
